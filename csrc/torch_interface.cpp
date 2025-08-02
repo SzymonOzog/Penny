@@ -1,7 +1,6 @@
 #include "bootstrap_device_host/nvshmem_uniqueid.h"
 #include <pybind11/functional.h>
 #include <torch/python.h>
-#include <iostream>
 #include <string>
 #include <vector>
 #include <cuda.h>
@@ -11,7 +10,6 @@
 
 void init_with_uid(pybind11::bytearray uid_py, int rank, int world_size)
 {
-    std::cout<<rank<<" "<<world_size<<std::endl;
     auto uid_str = uid_py.cast<std::string>();
 
     nvshmemx_uniqueid_t uid;
