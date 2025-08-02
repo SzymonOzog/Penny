@@ -13,7 +13,6 @@ void init_with_uid(pybind11::bytearray uid_py, int rank, int world_size)
 {
     std::cout<<rank<<" "<<world_size<<std::endl;
     auto uid_str = uid_py.cast<std::string>();
-    std::cout<<uid_str<<std::endl;
 
     nvshmemx_uniqueid_t uid;
     std::memcpy(&uid, uid_str.c_str(), sizeof(nvshmemx_uniqueid_t));

@@ -1,15 +1,21 @@
 import torch
 import torch.distributed as dist
 import penny_cpp
+
 dist.init_process_group(backend="nccl")
-local_rank = dist.get_rank() % torch.cuda.device_count()
-torch.cuda.set_device(local_rank)
+rank = dist.get_rank()
 world_size = dist.get_world_size()
+# TODO how do I get this
+local_size = world_size//2
+local_rank = dist.get_rank() % local_size
+
+torch.cuda.set_device(local_rank)
 nvshmem_uid = penny_cpp.get_unique_id()
-print(nvshmem_uid)
+print(f"{rank=} {local_rank=} {world_size=} local uuid {nvshmem_uid}")
 
 nvshmem_uids = [None, ] * world_size
 dist.all_gather_object(nvshmem_uids, nvshmem_uid)
+print("initializing with uuid", nvshmem_uids[0])
 penny_cpp.init_with_uid(nvshmem_uids[0], dist.get_rank(), world_size)
 penny_cpp.run_example()
 
