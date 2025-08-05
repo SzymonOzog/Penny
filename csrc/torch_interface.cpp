@@ -23,6 +23,8 @@ void run_example();
 
 void all_reduce(torch::Tensor& buffer, int world_size, int local_size);
 
+void exchange(torch::Tensor& buffer, int packet_size, int block_size, int peer);
+
 pybind11::bytearray get_nvshmem_unique_id() 
 {
     nvshmemx_uniqueid_t unique_id;
@@ -37,4 +39,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("init_with_uid", &init_with_uid);
     m.def("run_example", &run_example);
     m.def("all_reduce", &all_reduce);
+    m.def("exchange", &exchange);
 }

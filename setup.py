@@ -16,7 +16,10 @@ if __name__ == '__main__':
     cxx_flags = ['-O3', '-Wno-deprecated-declarations', '-Wno-unused-variable',
                  '-Wno-sign-compare', '-Wno-reorder', '-Wno-attributes']
     nvcc_flags = ['-O3', '-Xcompiler', '-O3', '-rdc=true']
-    sources = ['csrc/torch_interface.cpp', "csrc/example.cu", "csrc/all_reduce.cu"]
+    sources = ['csrc/torch_interface.cpp',
+               "csrc/example.cu",
+               "csrc/exchange.cu",
+               "csrc/all_reduce.cu"]
     include_dirs = ['csrc/', nvshmem_inc]
     library_dirs = [nvshmem_lib]
     nvcc_dlink = ['-dlink', f'-L{nvshmem_lib}', '-lnvshmem_device']
