@@ -46,9 +46,9 @@ if __name__ == '__main__':
     setuptools.setup(
         name='penny',
         version='0.0.1',
-        # packages=setuptools.find_packages(
-        #     include=['deep_ep']
-        # ),
+        packages=setuptools.find_packages(
+            include=['Penny']
+        ),
         ext_modules=[
             CUDAExtension(
                 name='penny_cpp',
