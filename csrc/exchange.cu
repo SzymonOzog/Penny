@@ -15,14 +15,6 @@ __global__ void exchange(scalar_t *destination, scalar_t* buffer, int peer, int 
     // nvshmem_putmem(destination + off, buffer + off, PACKET_SIZE, peer);
     nvshmemx_putmem_block(destination + off, buffer + off, packet_size*blockDim.x, peer);
     // nvshmemx_putmem_warp(destination + off, buffer + off, PACKET_SIZE*32, peer);
-    // nvshmem_half_p(destination + off, buffer[off], peer);
-    // nvshmem_fence();
-
-
-    // for (int i = 0; i < PACKET_SIZE/sizeof(scalar_t); i++)
-    // {
-    //     buffer[i + off] = destination[i + off];
-    // }
 }
 
 void exchange(torch::Tensor& buffer, int packet_size, int block_size, int peer) 
