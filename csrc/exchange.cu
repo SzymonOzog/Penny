@@ -26,7 +26,7 @@ void exchange(torch::Tensor& buffer, int packet_size, int block_size, int peer)
     half *destination = (half *) nvshmem_malloc(buffer.numel() * sizeof(half));
     nvshmemx_buffer_register(buffer.data_ptr(), buffer.numel() * sizeof(half));
     
-    const uint32_t grid_size = buffer.numel()*sizeof(half) / (packet_size*block_size);
+    const uint32_t grid_size = std::ceil(buffer.numel()*sizeof(half) / float(packet_size*block_size));
 
     exchange<<<grid_size, block_size, 0, stream>>>(destination,
             static_cast<half*>(buffer.data_ptr()),
