@@ -1,4 +1,6 @@
 import torch
+import torch.distributed as dist
+import penny_cpp
 from typing import Optional, Union
 
 class empty_suppress:
@@ -107,3 +109,19 @@ def bench_kineto(fn, kernel_names: Union[str, tuple], num_tests: int = 30, suppr
 
     # Return execution durations
     return kernel_durations if is_tuple else kernel_durations[0]
+
+
+def initialize_distributed():
+    dist.init_process_group(backend="nccl")
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+# TODO how do I get this
+    local_size = world_size//2
+    local_rank = dist.get_rank() % local_size
+
+    torch.cuda.set_device(local_rank)
+    nvshmem_uid = penny_cpp.get_unique_id()
+
+    nvshmem_uids = [None, ] * world_size
+    dist.all_gather_object(nvshmem_uids, nvshmem_uid)
+    penny_cpp.init_with_uid(nvshmem_uids[0], dist.get_rank(), world_size)

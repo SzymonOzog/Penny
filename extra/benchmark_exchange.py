@@ -2,25 +2,17 @@
 import torch
 import torch.distributed as dist
 import penny_cpp
-from Penny.utils import bench_kineto
+from Penny.utils import bench_kineto, initialize_distributed
 from torch.profiler import profile, ProfilerActivity
 from triton.testing import do_bench
 
-dist.init_process_group(backend="nccl")
+initialize_distributed()
 rank = dist.get_rank()
 world_size = dist.get_world_size()
-# TODO how do I get this
 local_size = world_size//2
 local_rank = dist.get_rank() % local_size
 
-torch.cuda.set_device(local_rank)
-nvshmem_uid = penny_cpp.get_unique_id()
-
-nvshmem_uids = [None, ] * world_size
-dist.all_gather_object(nvshmem_uids, nvshmem_uid)
-penny_cpp.init_with_uid(nvshmem_uids[0], dist.get_rank(), world_size)
-
-num = 2**22
+num = 2**12
 for packet_size in [2, 8, 16, 32, 64, 512]:
     for block_size in [32, 256, 512, 1024]:
         #TODO why is intranode failing?
