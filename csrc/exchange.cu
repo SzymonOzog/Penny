@@ -10,10 +10,12 @@
 template <typename scalar_t>
 __global__ void exchange(scalar_t *destination, scalar_t* buffer, int peer, int packet_size) 
 {
-    const uint32_t off = (blockIdx.x * blockDim.x + threadIdx.x) * packet_size/sizeof(scalar_t);
+    const uint64_t off = (blockIdx.x * blockDim.x + threadIdx.x) * packet_size/sizeof(scalar_t);
+    const uint64_t block_size = blockDim.x * packet_size;
+    
+    nvshmemx_putmem_block(destination + off, buffer + off, block_size, peer);
 
     // nvshmem_putmem(destination + off, buffer + off, PACKET_SIZE, peer);
-    nvshmemx_putmem_block(destination + off, buffer + off, packet_size*blockDim.x, peer);
     // nvshmemx_putmem_warp(destination + off, buffer + off, PACKET_SIZE*32, peer);
 }
 
