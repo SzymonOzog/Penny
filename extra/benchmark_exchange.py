@@ -9,18 +9,22 @@ from triton.testing import do_bench
 initialize_distributed()
 rank = dist.get_rank()
 world_size = dist.get_world_size()
-local_size = world_size//2
+nnodes = 2
+local_size = world_size//nnodes
 local_rank = dist.get_rank() % local_size
 
-num = 2**12
-for packet_size in [2, 8, 16, 32, 64, 512]:
-    for block_size in [32, 256, 512, 1024]:
-        #TODO why is intranode failing?
-        for mode in ["internode"]:#, "intranode"]:
+num = 2**18
+#TODO why is intranode failing?
+for mode in ["internode", "intranode"]:
+    for packet_size in [2, 8, 16, 32, 64, 512]:
+        for block_size in [32, 256, 512, 1024]:
+            if num%(packet_size * block_size) != 0:
+                continue
+
             if mode == "internode":
                 src = (rank + local_size)%world_size
             else: 
-                src = (rank//2) * 2 + (local_rank + 1)%local_size
+                src = (rank//local_size) * local_size + (local_rank + 1)%local_size
             configuration = f"{mode=} {packet_size=} {block_size=} {src=}"
 
             data = torch.FloatTensor([rank,] * num).to("cuda").to(torch.float16)
@@ -36,7 +40,7 @@ for packet_size in [2, 8, 16, 32, 64, 512]:
             torch.cuda.synchronize()
 
             penny_cpp.exchange(data2, packet_size, block_size, src)
-            if not (data_r==data2).all():
+            if not (data_r==data2).all() and rank == 0:
                 print(f"failed {configuration=} {rank=} {data_r.mean()} {data2.mean()}")
                 continue
 

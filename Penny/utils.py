@@ -116,7 +116,8 @@ def initialize_distributed():
     rank = dist.get_rank()
     world_size = dist.get_world_size()
 # TODO how do I get this
-    local_size = world_size//2
+    nnodes = 2
+    local_size = world_size//nnodes
     local_rank = dist.get_rank() % local_size
 
     torch.cuda.set_device(local_rank)
