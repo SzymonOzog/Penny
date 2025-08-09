@@ -1,7 +1,8 @@
 #include "host/nvshmem_api.h"
 #include "host/nvshmemx_api.h"
 #include <pybind11/functional.h>
-#include <torch/python.h>
+#include <torch/all.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <cuda.h>
 #include <cuda_fp16.h>
 #include <nvshmem.h>
@@ -10,20 +11,18 @@
 template <typename scalar_t>
 __global__ void exchange(scalar_t *destination, scalar_t* buffer, int peer, int packet_size) 
 {
-    const uint64_t off = (blockIdx.x * blockDim.x + threadIdx.x) * packet_size/sizeof(scalar_t);
+    const uint64_t off = (blockIdx.x * blockDim.x ) * packet_size/sizeof(scalar_t);
     const uint64_t block_size = blockDim.x * packet_size;
-    
+
     nvshmemx_putmem_block(destination + off, buffer + off, block_size, peer);
 
-    // nvshmem_putmem(destination + off, buffer + off, PACKET_SIZE, peer);
-    // nvshmemx_putmem_warp(destination + off, buffer + off, PACKET_SIZE*32, peer);
+    // nvshmem_putmem(destination + off, buffer + off, packet_size, peer);
+    // nvshmemx_putmem_warp(destination + off, buffer + off, packet_size*32, peer);
 }
 
 void exchange(torch::Tensor& buffer, int packet_size, int block_size, int peer) 
 {
-    cudaStream_t stream;
-
-    cudaStreamCreate(&stream);
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
     half *destination = (half *) nvshmem_malloc(buffer.numel() * sizeof(half));
     nvshmemx_buffer_register(buffer.data_ptr(), buffer.numel() * sizeof(half));
