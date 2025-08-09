@@ -24,31 +24,36 @@ for mode in ["internode", "intranode"]:
             if mode == "internode":
                 src = (rank + local_size)%world_size
             else: 
-                src = (rank//local_size) * local_size + (local_rank + 1)%local_size
+                if local_rank % 2 == 0:
+                    src = (rank//local_size) * local_size + (local_rank + 1)%local_size
+                else:
+                    src = (rank//local_size) * local_size + (local_rank - 1)%local_size
             configuration = f"{mode=} {packet_size=} {block_size=} {src=}"
 
-            data = torch.FloatTensor([rank,] * num).to("cuda").to(torch.float16)
-            data2 = torch.FloatTensor([rank,] * num).to("cuda").to(torch.float16)
-            data_r = torch.FloatTensor([rank,] * num).to("cuda").to(torch.float16)
+            data = torch.randn(num).to("cuda").to(torch.float16)
+            data2 = data.clone()
+            data_r = torch.FloatTensor([0,] * num).to("cuda").to(torch.float16)
 
             ops = [dist.P2POp(dist.isend, data, src),
                    dist.P2POp(dist.irecv, data_r, src)]
-            if rank > 1:
+            if mode == "internode" and rank >= world_size//(2):
+                ops = list(reversed(ops))
+            if mode == "intranode" and rank%2:
                 ops = list(reversed(ops))
 
             dist.batch_isend_irecv(ops)
             torch.cuda.synchronize()
 
             penny_cpp.exchange(data2, packet_size, block_size, src)
-            if not (data_r==data2).all() and rank == 0:
-                print(f"failed {configuration=} {rank=} {data_r.mean()} {data2.mean()}")
-                continue
+            if not (data_r==data2).all():
+                if rank == 0:
+                    print(f"failed {configuration=} {rank=} {data_r.mean()} {data2.mean()}")
 
             nccl_time =  bench_kineto(lambda: dist.batch_isend_irecv(ops), kernel_names="nccl")
             penny_time = bench_kineto(lambda: penny_cpp.exchange(data2, packet_size, block_size, src), "exchange")
 
 
-            if rank == 0:
+            if rank == 2:
                 recv_bytes = data2.nelement() * data2.element_size() * 2
-                print(f"{configuration=} nccl time: {nccl_time*1e6:.2f}us, bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  penny_time: {penny_time*1e6:.2f}, bandwidth {recv_bytes / 1e9 / penny_time :.2f} GB")
+                print(f"{configuration=} nccl time: {nccl_time*1e6:.2f}us, bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  penny_time: {penny_time*1e6:.2f}, bandwidth {recv_bytes / 1e9 / penny_time :.2f} GB, sanity check nccl {data_r.mean()}, sanity check penny {data2.mean()}")
 
