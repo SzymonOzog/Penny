@@ -14,7 +14,6 @@ local_size = world_size//nnodes
 local_rank = dist.get_rank() % local_size
 
 num = 2**18
-#TODO why is intranode failing?
 for mode in ["internode", "intranode"]:
     for packet_size in [2, 8, 16, 32, 64, 512]:
         for block_size in [32, 256, 512, 1024]:
@@ -47,13 +46,14 @@ for mode in ["internode", "intranode"]:
             penny_cpp.exchange(data2, packet_size, block_size, src)
             if not (data_r==data2).all():
                 if rank == 0:
-                    print(f"failed {configuration=} {rank=} {data_r.mean()} {data2.mean()}")
+                    idx = data_r == data2
+                    num_missed =  idx.logical_not().sum() / idx.nelement()
+                    print(f"failed {configuration=} {rank=}, {num_missed=}")
 
             nccl_time =  bench_kineto(lambda: dist.batch_isend_irecv(ops), kernel_names="nccl")
             penny_time = bench_kineto(lambda: penny_cpp.exchange(data2, packet_size, block_size, src), "exchange")
 
 
-            if rank == 2:
+            if rank == 0:
                 recv_bytes = data2.nelement() * data2.element_size() * 2
-                print(f"{configuration=} nccl time: {nccl_time*1e6:.2f}us, bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  penny_time: {penny_time*1e6:.2f}, bandwidth {recv_bytes / 1e9 / penny_time :.2f} GB, sanity check nccl {data_r.mean()}, sanity check penny {data2.mean()}")
-
+                print(f"{configuration=} nccl time: {nccl_time*1e6:.2f}us, bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  penny_time: {penny_time*1e6:.2f}, bandwidth {recv_bytes / 1e9 / penny_time :.2f} GB")
