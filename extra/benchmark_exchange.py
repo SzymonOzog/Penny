@@ -2,7 +2,7 @@
 import torch
 import torch.distributed as dist
 import penny_cpp
-from Penny.utils import bench_kineto, initialize_distributed
+from penny.utils import bench_kineto, initialize_distributed
 from torch.profiler import profile, ProfilerActivity
 from triton.testing import do_bench
 

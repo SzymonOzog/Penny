@@ -1,7 +1,8 @@
+import time
 import torch
 import torch.distributed as dist
 import penny_cpp
-from Penny.utils import bench_kineto
+from penny.utils import bench_kineto
 from torch.profiler import profile, ProfilerActivity
 from triton.testing import do_bench
 

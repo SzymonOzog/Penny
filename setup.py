@@ -47,7 +47,7 @@ if __name__ == '__main__':
         name='penny',
         version='0.0.1',
         packages=setuptools.find_packages(
-            include=['Penny']
+            include=['penny']
         ),
         ext_modules=[
             CUDAExtension(
