@@ -49,6 +49,7 @@ void exchange(torch::Tensor& buffer, int packet_size, int block_size, int peer)
             packet_size);
 
     nvshmemx_barrier_all_on_stream(stream);
+    cudaStreamSynchronize(stream);
 
     nvshmemx_buffer_unregister(buffer.data_ptr());
     nvshmem_free(destination);
