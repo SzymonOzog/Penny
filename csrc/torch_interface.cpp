@@ -21,7 +21,7 @@ void init_with_uid(pybind11::bytearray uid_py, int rank, int world_size)
 
 void run_example();
 
-void all_reduce(torch::Tensor& buffer, int world_size, int local_size);
+void all_reduce(torch::Tensor& buffer, int packet_size, int block_size);
 
 void exchange(torch::Tensor& buffer, int packet_size, int block_size, int peer);
 
