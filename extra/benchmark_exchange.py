@@ -9,7 +9,7 @@ from triton.testing import do_bench
 initialize_distributed()
 rank = dist.get_rank()
 world_size = dist.get_world_size()
-nnodes = 2
+nnodes = os.getenv("NNODES")
 local_size = world_size//nnodes
 local_rank = dist.get_rank() % local_size
 

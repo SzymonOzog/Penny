@@ -1,6 +1,7 @@
 import torch
 import torch.distributed as dist
 import penny_cpp
+import os
 from typing import Optional, Union
 
 class empty_suppress:
@@ -115,12 +116,11 @@ def initialize_distributed():
     dist.init_process_group(backend="nccl")
     rank = dist.get_rank()
     world_size = dist.get_world_size()
-# TODO how do I get this
-    nnodes = 2
+    nnodes = int(os.getenv("NNODES"))
     local_size = world_size//nnodes
     local_rank = dist.get_rank() % local_size
 
-    torch.cuda.set_device(local_rank)
+    torch.cuda.set_device(local_rank + 6)
     nvshmem_uid = penny_cpp.get_unique_id()
 
     nvshmem_uids = [None, ] * world_size
