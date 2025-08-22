@@ -89,6 +89,9 @@ void all_reduce(torch::Tensor& buffer, int packet_size, int block_size)
 
     uint64_t *signal = (uint64_t *) nvshmem_malloc(grid_size * 2 * sizeof(uint64_t));
     cudaMemset(signal, 0, grid_size * 2 * sizeof(uint64_t));
+    //sync the memset before running kernel
+    nvshmemx_barrier_all_on_stream(stream);
+
     int send_peer = (nvshmem_my_pe()+1) % nvshmem_n_pes();
     int recv_peer = (nvshmem_n_pes() + nvshmem_my_pe()-1) % nvshmem_n_pes();
 

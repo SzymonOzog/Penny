@@ -39,8 +39,7 @@ for packet_size in [8, 16, 32, 64, 512]:
             print(data2[idx.logical_not()])
 
         nccl_time =  bench_kineto(lambda: dist.all_reduce(data), kernel_names="nccl")
-        # TODO why big num tests hangs
-        penny_time = bench_kineto(lambda: penny_cpp.all_reduce(data2, packet_size, block_size), num_tests=5, kernel_names="all_reduce")
+        penny_time = bench_kineto(lambda: penny_cpp.all_reduce(data2, packet_size, block_size), kernel_names="all_reduce")
 
 
         if rank == 0:
