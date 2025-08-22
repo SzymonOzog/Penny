@@ -38,7 +38,8 @@ __global__ void all_reduce(scalar_t *destination, scalar_t* buffer, uint64_t* si
 
         for (int i = threadIdx.x; i < block_size/sizeof(scalar_t); i += blockDim.x)
         {
-            buffer[recv_chunk*chunk_off + off + i] += destination[off + i];
+            float res = float(buffer[recv_chunk*chunk_off + off + i]) + float(destination[off + i]);
+            buffer[recv_chunk*chunk_off + off + i] = res;
         }
         __syncthreads();
         if (threadIdx.x == 0)
