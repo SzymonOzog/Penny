@@ -120,7 +120,7 @@ def initialize_distributed():
     local_size = world_size//nnodes
     local_rank = dist.get_rank() % local_size
 
-    torch.cuda.set_device(local_rank + 6)
+    torch.cuda.set_device(local_rank)
     nvshmem_uid = penny_cpp.get_unique_id()
 
     nvshmem_uids = [None, ] * world_size
