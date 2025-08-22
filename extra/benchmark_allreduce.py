@@ -44,5 +44,5 @@ for packet_size in [8, 16, 32, 64, 512]:
 
 
         if rank == 0:
-            recv_bytes = data2.nelement() * data2.element_size() * (world_size-1) * 2
+            recv_bytes = data2.nelement() * data2.element_size() * (world_size-1)//world_size * 2
             print(f"{configuration=} nccl time: {nccl_time*1e6:.2f}us, bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  penny_time: {penny_time*1e6:.2f}, bandwidth {recv_bytes / 1e9 / penny_time :.2f} GB")
