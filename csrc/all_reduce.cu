@@ -12,7 +12,7 @@
 #include <nvshmemx.h>
 
 template <typename scalar_t>
-__global__ void all_reduce(scalar_t *destination, scalar_t* buffer, uint64_t* signal, int peer, int packet_size) 
+__global__ void all_reduce(scalar_t *destination, scalar_t* buffer, uint64_t* signal, int send_peer, int recv_peer, int packet_size) 
 {
     const uint64_t off = (blockIdx.x * blockDim.x) * packet_size/sizeof(scalar_t);
     const uint64_t block_size = blockDim.x * packet_size;
@@ -25,15 +25,14 @@ __global__ void all_reduce(scalar_t *destination, scalar_t* buffer, uint64_t* si
 
         nvshmem_signal_wait_until(signal + gridDim.x + blockIdx.x, NVSHMEM_CMP_GE, chunk);
 
-
-        nvshmemx_putmem_block(destination + off, buffer + send_chunk*chunk_off + off, block_size, peer);
+        nvshmemx_putmem_block(destination + off, buffer + send_chunk*chunk_off + off, block_size, send_peer);
 
         nvshmem_fence();
         __syncthreads();
 
         if (threadIdx.x == 0)
         {
-            nvshmemx_signal_op(signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, peer);
+            nvshmemx_signal_op(signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, send_peer);
         }
         nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_GE, chunk+1);
 
@@ -44,7 +43,7 @@ __global__ void all_reduce(scalar_t *destination, scalar_t* buffer, uint64_t* si
         __syncthreads();
         if (threadIdx.x == 0)
         {
-            nvshmemx_signal_op(signal + gridDim.x + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, peer);
+            nvshmemx_signal_op(signal + gridDim.x + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, recv_peer);
         }
     }
 
@@ -54,18 +53,16 @@ __global__ void all_reduce(scalar_t *destination, scalar_t* buffer, uint64_t* si
         int recv_chunk = (nvshmem_n_pes() + nvshmem_my_pe() - chunk) % nvshmem_n_pes();
 
         nvshmem_signal_wait_until(signal + gridDim.x + blockIdx.x, NVSHMEM_CMP_GE, nvshmem_n_pes() - 1 + chunk);
-
-        nvshmemx_putmem_block(destination + off, buffer + send_chunk*chunk_off + off, block_size, peer);
+        nvshmemx_putmem_block(destination + off, buffer + send_chunk*chunk_off + off, block_size, send_peer);
 
         nvshmem_fence();
         __syncthreads();
 
         if (threadIdx.x == 0)
         {
-            nvshmemx_signal_op(signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, peer);
+            nvshmemx_signal_op(signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, send_peer);
         }
         nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_GE, nvshmem_n_pes()+chunk);
-
 
         for (int i = threadIdx.x; i < block_size/sizeof(scalar_t); i += blockDim.x)
         {
@@ -74,7 +71,7 @@ __global__ void all_reduce(scalar_t *destination, scalar_t* buffer, uint64_t* si
         __syncthreads();
         if (threadIdx.x == 0 && chunk < nvshmem_n_pes() - 1)
         {
-            nvshmemx_signal_op(signal + gridDim.x + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, peer);
+            nvshmemx_signal_op(signal + gridDim.x + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, recv_peer);
         }
     }
 }
@@ -91,12 +88,14 @@ void all_reduce(torch::Tensor& buffer, int packet_size, int block_size)
 
     uint64_t *signal = (uint64_t *) nvshmem_malloc(grid_size * 2 * sizeof(uint64_t));
     cudaMemset(signal, 0, grid_size * 2 * sizeof(uint64_t));
-    int peer = (nvshmem_my_pe()+1) % nvshmem_n_pes();
+    int send_peer = (nvshmem_my_pe()+1) % nvshmem_n_pes();
+    int recv_peer = (nvshmem_n_pes() + nvshmem_my_pe()-1) % nvshmem_n_pes();
 
     all_reduce<<<grid_size, block_size, 0, stream>>>(destination,
             static_cast<half*>(buffer.data_ptr()),
             signal,
-            peer,
+            send_peer,
+            recv_peer,
             packet_size);
 
     nvshmemx_barrier_all_on_stream(stream);
