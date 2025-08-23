@@ -19,7 +19,7 @@ if __name__ == '__main__':
     sources = ['csrc/torch_interface.cpp',
                "csrc/example.cu",
                "csrc/exchange.cu",
-               "csrc/all_reduce.cu"]
+               "csrc/all_reduce_ring.cu"]
     include_dirs = ['csrc/', nvshmem_inc]
     library_dirs = [nvshmem_lib]
     nvcc_dlink = ['-dlink', f'-L{nvshmem_lib}', '-lnvshmem_device']

@@ -23,11 +23,11 @@ void init_with_uid(pybind11::bytearray uid_py, int rank, int world_size)
 
 void run_example();
 
-void all_reduce(half* buffer, int numel, int packet_size, int block_size, cudaStream_t stream);
+void all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, cudaStream_t stream);
 
 void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size)
 {
-    all_reduce(static_cast<half*>(buffer.data_ptr()),
+    all_reduce_ring(static_cast<half*>(buffer.data_ptr()),
             buffer.numel(),
             packet_size,
             block_size,
