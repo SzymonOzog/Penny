@@ -1,6 +1,8 @@
 #include "bootstrap_device_host/nvshmem_uniqueid.h"
 #include <pybind11/functional.h>
 #include <torch/python.h>
+#include <torch/all.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <string>
 #include <vector>
 #include <cuda.h>
@@ -21,7 +23,17 @@ void init_with_uid(pybind11::bytearray uid_py, int rank, int world_size)
 
 void run_example();
 
-void all_reduce(torch::Tensor& buffer, int packet_size, int block_size);
+void all_reduce(half* buffer, int numel, int packet_size, int block_size, cudaStream_t stream);
+
+void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size)
+{
+    all_reduce(static_cast<half*>(buffer.data_ptr()),
+            buffer.numel(),
+            packet_size,
+            block_size,
+            at::cuda::getCurrentCUDAStream()
+            );
+}
 
 void exchange(torch::Tensor& buffer, int packet_size, int block_size, int peer);
 
@@ -38,6 +50,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("get_unique_id", &get_nvshmem_unique_id);
     m.def("init_with_uid", &init_with_uid);
     m.def("run_example", &run_example);
-    m.def("all_reduce", &all_reduce);
+    m.def("all_reduce", &all_reduce_launcher);
     m.def("exchange", &exchange);
 }

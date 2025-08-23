@@ -3,9 +3,6 @@
 #include "host/nvshmemx_api.h"
 #include <cstdint>
 #include <cstdio>
-#include <pybind11/functional.h>
-#include <torch/all.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <cuda.h>
 #include <cuda_fp16.h>
 #include <nvshmem.h>
@@ -77,18 +74,17 @@ __global__ void all_reduce(scalar_t *destination, scalar_t* buffer, uint64_t* si
     }
 }
 
-void all_reduce(torch::Tensor& buffer, int packet_size, int block_size) 
+void all_reduce(half* buffer, int numel, int packet_size, int block_size, cudaStream_t stream) 
 {
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    half *destination = (half *) nvshmem_malloc(numel * sizeof(half) / nvshmem_n_pes());
 
-    half *destination = (half *) nvshmem_malloc(buffer.numel() * sizeof(half) / nvshmem_n_pes());
-
-    nvshmemx_buffer_register(buffer.data_ptr(), buffer.numel() * sizeof(half));
+    nvshmemx_buffer_register(buffer, numel * sizeof(half));
     
-    const uint32_t grid_size = std::ceil(buffer.numel()*sizeof(half) / float(packet_size*block_size*nvshmem_n_pes()));
+    const uint32_t grid_size = std::ceil(numel*sizeof(half) / float(packet_size*block_size*nvshmem_n_pes()));
 
     uint64_t *signal = (uint64_t *) nvshmem_malloc(grid_size * 2 * sizeof(uint64_t));
     cudaMemset(signal, 0, grid_size * 2 * sizeof(uint64_t));
+    
     //sync the memset before running kernel
     nvshmemx_barrier_all_on_stream(stream);
 
@@ -96,7 +92,7 @@ void all_reduce(torch::Tensor& buffer, int packet_size, int block_size)
     int recv_peer = (nvshmem_n_pes() + nvshmem_my_pe()-1) % nvshmem_n_pes();
 
     all_reduce<<<grid_size, block_size, 0, stream>>>(destination,
-            static_cast<half*>(buffer.data_ptr()),
+            static_cast<half*>(buffer),
             signal,
             send_peer,
             recv_peer,
@@ -105,6 +101,6 @@ void all_reduce(torch::Tensor& buffer, int packet_size, int block_size)
     nvshmemx_barrier_all_on_stream(stream);
     cudaStreamSynchronize(stream);
 
-    nvshmemx_buffer_unregister(buffer.data_ptr());
+    nvshmemx_buffer_unregister(buffer);
     nvshmem_free(destination);
 }
