@@ -29,9 +29,9 @@ for packet_size in [8, 16, 32, 64, 512]:
         data2 = data.clone()
 
         dist.all_reduce(data)
-        penny_cpp.all_reduce(data2, packet_size, block_size)
+        penny_cpp.all_reduce(data2, packet_size, block_size, nnodes)
 
-        if not torch.allclose(data, data2, atol=atol, rtol=rtol):
+        if not torch.allclose(data, data2, atol=atol, rtol=rtol) and rank == 0:
             idx = torch.isclose(data, data2, atol=atol, rtol=rtol) 
             num_missed =  idx.logical_not().sum() / idx.nelement()
             print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {data2.mean()}")
@@ -39,7 +39,7 @@ for packet_size in [8, 16, 32, 64, 512]:
             print(data2[idx.logical_not()])
 
         nccl_time =  bench_kineto(lambda: dist.all_reduce(data), kernel_names="nccl")
-        penny_time = bench_kineto(lambda: penny_cpp.all_reduce(data2, packet_size, block_size), kernel_names="all_reduce")
+        penny_time = bench_kineto(lambda: penny_cpp.all_reduce(data2, packet_size, block_size, nnodes), kernel_names="all_reduce")
 
 
         if rank == 0:
