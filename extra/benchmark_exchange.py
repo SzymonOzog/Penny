@@ -1,5 +1,5 @@
-
 import torch
+import os
 import torch.distributed as dist
 import penny_cpp
 from penny.utils import bench_kineto, initialize_distributed
@@ -9,7 +9,7 @@ from triton.testing import do_bench
 initialize_distributed()
 rank = dist.get_rank()
 world_size = dist.get_world_size()
-nnodes = os.getenv("NNODES")
+nnodes = int(os.getenv("NNODES"))
 local_size = world_size//nnodes
 local_rank = dist.get_rank() % local_size
 
