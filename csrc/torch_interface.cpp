@@ -21,8 +21,6 @@ void init_with_uid(pybind11::bytearray uid_py, int rank, int world_size)
     nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr);
 }
 
-void run_example();
-
 void all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, cudaStream_t stream);
 void all_reduce_double_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
 
@@ -57,7 +55,6 @@ pybind11::bytearray get_nvshmem_unique_id()
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("get_unique_id", &get_nvshmem_unique_id);
     m.def("init_with_uid", &init_with_uid);
-    m.def("run_example", &run_example);
     m.def("all_reduce", &all_reduce_launcher);
     m.def("exchange", &exchange);
 }
