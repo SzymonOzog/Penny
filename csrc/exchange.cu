@@ -14,17 +14,17 @@ __global__ void exchange(scalar_t *destination, scalar_t* buffer, uint64_t* sign
     const uint64_t off = (blockIdx.x * blockDim.x ) * packet_size/sizeof(scalar_t);
     const uint64_t block_size = blockDim.x * packet_size;
 
-    nvshmemx_putmem_block(destination + off, buffer + off, block_size, peer);
-    nvshmem_fence();
+    nvshmemx_putmem_signal_block(destination + off, buffer + off, block_size, signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, peer);
+    
+    // nvshmemx_putmem_block(destination + off, buffer + off, block_size, peer);
+    // nvshmem_fence();
+    // __syncthreads();
+    // if (threadIdx.x == 0)
+    // {
+    //     nvshmemx_signal_op(signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, peer);
+    // }
 
-    __syncthreads();
-
-    constexpr uint64_t SIG_SYNC = 1;
-    if (threadIdx.x == 0)
-    {
-        nvshmemx_signal_op(signal + blockIdx.x, SIG_SYNC, NVSHMEM_SIGNAL_SET, peer);
-    }
-    nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_EQ, SIG_SYNC);
+    nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_GE, 1);
 
     const uint64_t thread_off = threadIdx.x * packet_size/sizeof(scalar_t);
     memcpy(buffer + off + thread_off, destination+off+thread_off, packet_size);
@@ -41,6 +41,10 @@ void exchange(torch::Tensor& buffer, int packet_size, int block_size, int peer)
     const uint32_t grid_size = std::ceil(buffer.numel()*sizeof(half) / float(packet_size*block_size));
 
     uint64_t *signal = (uint64_t *) nvshmem_malloc(grid_size * sizeof(uint64_t));
+    cudaMemset(signal, 0, grid_size*sizeof(uint64_t));
+
+    //sync the memset before running kernel
+    nvshmemx_barrier_all_on_stream(stream);
 
     exchange<<<grid_size, block_size, 0, stream>>>(destination,
             static_cast<half*>(buffer.data_ptr()),
