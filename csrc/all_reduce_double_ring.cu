@@ -35,16 +35,10 @@ __global__ void all_reduce_double_ring_kernel(scalar_t *destination, scalar_t* b
 
                 nvshmem_signal_wait_until(signal + gridDim.x + blockIdx.x, NVSHMEM_CMP_GE, stage);
 
-                nvshmemx_putmem_block(destination + off, buffer + part_off  + send_chunk*chunk_off + off, block_size, send_peer);
+                nvshmemx_putmem_signal_block(destination + off, buffer + part_off  + send_chunk*chunk_off + off, block_size,
+                        signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, send_peer);
 
-                nvshmem_fence();
-                __syncthreads();
                 stage++;
-
-                if (threadIdx.x == 0)
-                {
-                    nvshmemx_signal_op(signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, send_peer);
-                }
                 nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_GE, stage);
 
                 for (int i = threadIdx.x; i < block_size/sizeof(scalar_t); i += blockDim.x)
@@ -65,16 +59,11 @@ __global__ void all_reduce_double_ring_kernel(scalar_t *destination, scalar_t* b
                 int recv_chunk = (nnodes + my_node - chunk) % nnodes;
 
                 nvshmem_signal_wait_until(signal + gridDim.x + blockIdx.x, NVSHMEM_CMP_GE, stage);
-                nvshmemx_putmem_block(destination + off, buffer  + part_off + send_chunk*chunk_off + off, block_size, send_peer);
 
-                nvshmem_fence();
-                __syncthreads();
+                nvshmemx_putmem_signal_block(destination + off, buffer + part_off  + send_chunk*chunk_off + off, block_size,
+                        signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, send_peer);
+
                 stage++;
-
-                if (threadIdx.x == 0)
-                {
-                    nvshmemx_signal_op(signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, send_peer);
-                }
                 nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_GE, stage);
 
                 for (int i = threadIdx.x; i < block_size/sizeof(scalar_t); i += blockDim.x)
@@ -109,16 +98,10 @@ __global__ void all_reduce_double_ring_kernel(scalar_t *destination, scalar_t* b
 
             nvshmem_signal_wait_until(signal + gridDim.x + blockIdx.x, NVSHMEM_CMP_GE, stage);
 
-            nvshmemx_putmem_block(destination + off, buffer + send_chunk*chunk_off + off, block_size, send_peer);
-
-            nvshmem_fence();
-            __syncthreads();
+            nvshmemx_putmem_signal_block(destination + off, buffer + send_chunk*chunk_off + off, block_size,
+                    signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, send_peer);
             stage++;
 
-            if (threadIdx.x == 0)
-            {
-                nvshmemx_signal_op(signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, send_peer);
-            }
             nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_GE, stage);
 
             for (int i = threadIdx.x; i < block_size/sizeof(scalar_t); i += blockDim.x)
@@ -139,16 +122,11 @@ __global__ void all_reduce_double_ring_kernel(scalar_t *destination, scalar_t* b
             int recv_chunk = (gpus_per_node + local_rank - chunk) % gpus_per_node;
 
             nvshmem_signal_wait_until(signal + gridDim.x + blockIdx.x, NVSHMEM_CMP_GE, stage);
-            nvshmemx_putmem_block(destination + off, buffer + send_chunk*chunk_off + off, block_size, send_peer);
+            nvshmemx_putmem_signal_block(destination + off, buffer + send_chunk*chunk_off + off, block_size,
+                    signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, send_peer);
 
-            nvshmem_fence();
-            __syncthreads();
             stage++;
 
-            if (threadIdx.x == 0)
-            {
-                nvshmemx_signal_op(signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, send_peer);
-            }
             nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_GE, stage);
 
             for (int i = threadIdx.x; i < block_size/sizeof(scalar_t); i += blockDim.x)
