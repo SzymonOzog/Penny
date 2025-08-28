@@ -15,17 +15,19 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
     const uint64_t block_size = blockDim.x * packet_size;
     const uint64_t chunk_off = (gridDim.x * blockDim.x) * packet_size/sizeof(scalar_t);
 
+    int stage = 0;
     for (int chunk = 0; chunk < nvshmem_n_pes() - 1; chunk++)
     {
         int send_chunk = (nvshmem_n_pes() + nvshmem_my_pe() - chunk) % nvshmem_n_pes();
         int recv_chunk = (nvshmem_n_pes() + nvshmem_my_pe() - chunk - 1) % nvshmem_n_pes();
 
-        nvshmem_signal_wait_until(signal + gridDim.x + blockIdx.x, NVSHMEM_CMP_GE, chunk);
+        nvshmem_signal_wait_until(signal + gridDim.x + blockIdx.x, NVSHMEM_CMP_GE, stage);
 
         nvshmemx_putmem_signal_block(destination + off, buffer + send_chunk*chunk_off + off, block_size,
                 signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, send_peer);
+        stage++;
 
-        nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_GE, chunk+1);
+        nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_GE, stage);
 
         for (int i = threadIdx.x; i < block_size/sizeof(scalar_t); i += blockDim.x)
         {
@@ -44,11 +46,12 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
         int send_chunk = (nvshmem_n_pes() + nvshmem_my_pe() - chunk + 1) % nvshmem_n_pes();
         int recv_chunk = (nvshmem_n_pes() + nvshmem_my_pe() - chunk) % nvshmem_n_pes();
 
-        nvshmem_signal_wait_until(signal + gridDim.x + blockIdx.x, NVSHMEM_CMP_GE, nvshmem_n_pes() - 1 + chunk);
+        nvshmem_signal_wait_until(signal + gridDim.x + blockIdx.x, NVSHMEM_CMP_GE, stage);
         nvshmemx_putmem_signal_block(destination + off, buffer + send_chunk*chunk_off + off, block_size,
                 signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, send_peer);
+        stage++;
 
-        nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_GE, nvshmem_n_pes()+chunk);
+        nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_GE, stage);
 
         for (int i = threadIdx.x; i < block_size/sizeof(scalar_t); i += blockDim.x)
         {
