@@ -34,6 +34,8 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
         stage++;
     }
 
+    destination += nvshmem_n_pes() * chunk_off;
+
     for (int chunk = 0; chunk < nvshmem_n_pes() - 1; chunk++)
     {
         int send_chunk = (nvshmem_n_pes() + nvshmem_my_pe() - chunk + 1) % nvshmem_n_pes();
@@ -54,7 +56,8 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
 
 void all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, cudaStream_t stream) 
 {
-    half *destination = (half *) nvshmem_malloc(numel * sizeof(half));
+    // Can we reduce te size of this buffer?
+    half *destination = (half *) nvshmem_malloc(2 * numel * sizeof(half));
 
     nvshmemx_buffer_register(buffer, numel * sizeof(half));
     
