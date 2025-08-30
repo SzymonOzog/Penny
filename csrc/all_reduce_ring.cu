@@ -55,7 +55,7 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
         int send_chunk = (nvshmem_n_pes() + nvshmem_my_pe() - chunk) % nvshmem_n_pes();
         int recv_chunk = (nvshmem_n_pes() + nvshmem_my_pe() - chunk - 1) % nvshmem_n_pes();
 
-        nvshmemx_putmem_signal_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off, block_size,
+        nvshmemx_putmem_signal_nbi_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off, block_size,
                 local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer);
 
         nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, stage);
@@ -75,7 +75,7 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
         int send_chunk = (nvshmem_n_pes() + nvshmem_my_pe() - chunk + 1) % nvshmem_n_pes();
         int recv_chunk = (nvshmem_n_pes() + nvshmem_my_pe() - chunk) % nvshmem_n_pes();
 
-        nvshmemx_putmem_signal_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off, block_size,
+        nvshmemx_putmem_signal_nbi_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off, block_size,
                 local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer);
 
         nvshmem_signal_wait_until(local_signal , NVSHMEM_CMP_GE, stage);
