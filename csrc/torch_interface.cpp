@@ -21,24 +21,25 @@ void init_with_uid(pybind11::bytearray uid_py, int rank, int world_size)
     nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr);
 }
 
-void all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, cudaStream_t stream);
+void all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
 void all_reduce_double_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
 
 void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size, int nnodes)
 {
-    // all_reduce_ring(static_cast<half*>(buffer.data_ptr()),
-    //         buffer.numel(),
-    //         packet_size,
-    //         block_size,
-    //         at::cuda::getCurrentCUDAStream()
-    //         );
-    all_reduce_double_ring(static_cast<half*>(buffer.data_ptr()),
+    all_reduce_ring(static_cast<half*>(buffer.data_ptr()),
             buffer.numel(),
             packet_size,
             block_size,
             nnodes,
             at::cuda::getCurrentCUDAStream()
             );
+    // all_reduce_double_ring(static_cast<half*>(buffer.data_ptr()),
+    //         buffer.numel(),
+    //         packet_size,
+    //         block_size,
+    //         nnodes,
+    //         at::cuda::getCurrentCUDAStream()
+    //         );
 }
 
 void exchange(torch::Tensor& buffer, int packet_size, int block_size, int peer);
