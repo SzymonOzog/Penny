@@ -45,7 +45,7 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
         send_peer = (n_pes + pe - gpus_per_node+1) % n_pes;
         recv_peer = my_node * gpus_per_node + (local_rank - 1) % gpus_per_node;
     }
-    else if (local_rank == (ring_id/2)*2 - 1)
+    else if (local_rank == (ring_id/2)*2 + 1)
     {
         send_peer = my_node * gpus_per_node + (local_rank + 1) % gpus_per_node;
         recv_peer = (n_pes + pe + gpus_per_node - 1) % n_pes;
@@ -56,18 +56,18 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
         recv_peer = my_node*gpus_per_node + (gpus_per_node + local_rank-1) % gpus_per_node;
     }
 
-    // if(threadIdx.x == 0 && blockIdx.x == 0 && ring_id == 0)
-    //     printf("rank %d ring %d send %d recv %d \n", pe, ring_id, send_peer, recv_peer);
+    if(ring_id%2 == 1)
+    {
+        swap_cu(send_chunk, recv_chunk);
+        swap_cu(send_peer, recv_peer);
+    }
 
     int stage = 1;
     uint64_t* local_signal = signal + blockIdx.x + blockIdx.y * gridDim.x;
     for (int chunk = 0; chunk < n_pes - 1; chunk++)
     {
-        // if(threadIdx.x == 0 && blockIdx.x == 0 && ring_id == 0)
-        //     printf("chunk %d rank %d ring %d send %d recv %d \n", chunk, pe, ring_id, send_chunk, recv_chunk);
-
-        nvshmemx_putmem_signal_nbi_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off, block_size,
-                local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer);
+        nvshmemx_putmem_signal_nbi_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off,
+                block_size, local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer);
 
         nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, stage);
 
@@ -78,10 +78,19 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
         }
         stage++;
         send_chunk = recv_chunk;
-        recv_chunk = (n_pes + recv_chunk - 1)%n_pes;
+        if(ring_id%2 == 1)
+            recv_chunk = (n_pes + recv_chunk + 1)%n_pes;
+        else
+            recv_chunk = (n_pes + recv_chunk - 1)%n_pes;
     }
 
-    destination += n_pes * chunk_off * gridDim.y; for (int chunk = 0; chunk < n_pes - 1; chunk++) { nvshmemx_putmem_signal_nbi_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off, block_size, local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer); nvshmem_signal_wait_until(local_signal , NVSHMEM_CMP_GE, stage);
+    destination += n_pes * chunk_off * gridDim.y;
+    for (int chunk = 0; chunk < n_pes - 1; chunk++)
+    {
+        nvshmemx_putmem_signal_nbi_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off,
+                block_size, local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer); 
+
+        nvshmem_signal_wait_until(local_signal , NVSHMEM_CMP_GE, stage);
 
         for (int i = threadIdx.x; i < block_size/sizeof(scalar_t); i += blockDim.x)
         {
@@ -89,7 +98,10 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
         }
         stage++;
         send_chunk = recv_chunk;
-        recv_chunk = (n_pes + recv_chunk - 1)%n_pes;
+        if(ring_id%2 == 1)
+            recv_chunk = (n_pes + recv_chunk + 1)%n_pes;
+        else
+            recv_chunk = (n_pes + recv_chunk - 1)%n_pes;
     }
 }
 
