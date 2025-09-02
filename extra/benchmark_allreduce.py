@@ -41,7 +41,7 @@ def main():
                 configuration = f"{packet_size=} {block_size=} {args.num=}"
 
                 data = torch.randn(args.num, device="cuda", dtype=torch.float16)
-                data = torch.ones(args.num, device="cuda", dtype=torch.float16)
+                # data = torch.ones(args.num, device="cuda", dtype=torch.float16) * rank
                 data2 = data.clone()
 
                 with record_function(configuration):
