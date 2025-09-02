@@ -12,7 +12,7 @@ def main():
     parser.add_argument("--num", type=int, default=2**28,
                         help="Total number of elements to reduce")
     parser.add_argument("--packet-sizes", type=int, nargs="+",
-                        default=[8, 16, 32, 64, 512],
+                        default=[64, 512, 2048],
                         help="List of packet sizes to test")
     parser.add_argument("--block-sizes", type=int, nargs="+",
                         default=[256, 512, 1024],
