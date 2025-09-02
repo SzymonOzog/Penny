@@ -1,8 +1,8 @@
-n_pes = 24
+n_pes = 16
 gpus_per_node = 8
 
 
-for ring_id in range(8):
+for ring_id in range(3):
     print(ring_id)
     sends = []
     recvs = []
@@ -42,7 +42,30 @@ for ring_id in range(8):
         send_chunk = (ring_pos)%n_pes
         recv_chunk = (ring_pos-1)%n_pes
 
-        if len(csends) and csends[-1] != recv_chunk:
+        if ring_id%2 == 1:
+            send_peer, recv_peer = recv_peer, send_peer
+            send_chunk, recv_chunk = recv_chunk, send_chunk
+        local_csends = []
+        local_crecvs = []
+        for chunk in range(n_pes):
+            local_crecvs.append(recv_chunk)
+            local_csends.append(send_chunk)
+            send_chunk = recv_chunk
+            if ring_id%2 == 1:
+                recv_chunk = (n_pes + recv_chunk + 1)%n_pes;
+            else:
+                recv_chunk = (n_pes + recv_chunk - 1)%n_pes;
+        for chunk in range(n_pes):
+            local_crecvs.append(recv_chunk)
+            local_csends.append(send_chunk)
+            send_chunk = recv_chunk
+            if ring_id%2 == 1:
+                recv_chunk = (n_pes + recv_chunk + 1)%n_pes;
+            else:
+                recv_chunk = (n_pes + recv_chunk - 1)%n_pes;
+            
+
+        if len(csends) and not all(x == y for x, y in zip(local_crecvs, csends[-1])):
             warning += "*"
 
         if ring_pos != real_pos:
@@ -50,10 +73,13 @@ for ring_id in range(8):
 
         sends.append(send_peer)
         recvs.append(recv_peer)
-        csends.append(send_chunk)
-        crecvs.append(recv_chunk)
-        print(color, ring_pos, pe, " ", recv_peer, send_peer, " ", recv_chunk, send_chunk, warning)
+        csends.append(local_csends)
+        crecvs.append(local_crecvs)
+        print(color, ring_pos, pe, " ", recv_peer, send_peer, " ", local_csends[0], local_crecvs[0], warning)
         pe = send_peer
-        real_pos +=1
+        if ring_id%2 == 1:
+            real_pos =(n_pes + real_pos - 1)%n_pes
+        else:
+            real_pos +=1
     print('\033[0m')
 
