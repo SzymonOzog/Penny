@@ -13,9 +13,21 @@ template <typename T> __device__ __forceinline__ void swap_cu(T& a, T& b)
     T c(a); a=b; b=c;
 }
 
+// like std::array, but aligned
+// goal: generate ld.128 and st.128 instructions
+template <typename T, int sz>
+struct __align__(alignof(T) * sz) array_t {
+  T data[sz];
+  using type = T;
+  static constexpr int size = sz;
+};
+
+
 template <typename scalar_t>
 __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, uint64_t* signal, int packet_size, int gpus_per_node) 
 {
+    using P = array_t<scalar_t, 16/sizeof(scalar_t)>;
+
     const uint64_t base_off = (blockIdx.x * blockDim.x) * packet_size/sizeof(scalar_t);
     const uint64_t block_size = blockDim.x * packet_size;
     const uint64_t chunk_off = (gridDim.x * blockDim.x) * packet_size/sizeof(scalar_t);
@@ -71,10 +83,14 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
 
         nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, stage);
 
-        for (int i = threadIdx.x; i < block_size/sizeof(scalar_t); i += blockDim.x)
+        for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
-            float res = float(buffer[recv_chunk*chunk_off + off + i]) + float(destination[off+ chunk*chunk_off + i]);
-            buffer[recv_chunk*chunk_off + off + i] = res;
+            P buf = reinterpret_cast<P*>(buffer + recv_chunk*chunk_off + off)[i];
+            P dst = reinterpret_cast<P*>(destination + off+ chunk*chunk_off)[i];
+            P res;
+            for (int j = 0; j < P::size; j++)
+                res.data[j] = float(buf.data[j]) + float(dst.data[j]);
+            reinterpret_cast<P*>(buffer + recv_chunk*chunk_off + off)[i] = res;
         }
         stage++;
         send_chunk = recv_chunk;
@@ -92,9 +108,10 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
 
         nvshmem_signal_wait_until(local_signal , NVSHMEM_CMP_GE, stage);
 
-        for (int i = threadIdx.x; i < block_size/sizeof(scalar_t); i += blockDim.x)
+        for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
-            buffer[recv_chunk*chunk_off + off + i] = destination[off + chunk*chunk_off + i];
+            reinterpret_cast<P*>(buffer + recv_chunk*chunk_off + off)[i] =
+                reinterpret_cast<P*>(destination + off+ chunk*chunk_off)[i];
         }
         stage++;
         send_chunk = recv_chunk;
