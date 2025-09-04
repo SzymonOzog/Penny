@@ -41,33 +41,38 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
     const uint32_t local_rank = pe%gpus_per_node;
     const uint32_t my_node = pe/gpus_per_node;
 
-    int send_peer;
+    int send_peer = 0;
     int recv_peer;
 
-    const int M = n_pes / gpus_per_node;
-    const int r1 = ((ring_id/2) * 2 + 1);
-    const int r_off = (gpus_per_node - r1) % gpus_per_node;
-    const int ring_pos = ((( -my_node) % M) * gpus_per_node + ((local_rank - r1) % gpus_per_node) - r_off) % n_pes;
+    int curr_pe = -1;
+    int ring_pos = -1;
+    // TODO this is currently a hack to get the ring position, since it changes a lot  
+    // it's easier to find it than to derive an expression for it
+    while (curr_pe != pe)
+    {
+        curr_pe = send_peer;
+        int curr_node = curr_pe/gpus_per_node;
+        int curr_rank = curr_pe%gpus_per_node;
+        if (curr_rank == (ring_id/2)*2)
+        {
+            send_peer = (n_pes + curr_pe - gpus_per_node+1) % n_pes;
+            recv_peer = curr_node * gpus_per_node + (gpus_per_node + curr_rank - 1) % gpus_per_node;
+        }
+        else if (curr_rank == (ring_id/2)*2 + 1)
+        {
+            send_peer = curr_node * gpus_per_node + (curr_rank + 1) % gpus_per_node;
+            recv_peer = (n_pes + curr_pe + gpus_per_node - 1) % n_pes;
+        }
+        else
+        {
+            send_peer = curr_node*gpus_per_node + (curr_rank+1) % gpus_per_node;
+            recv_peer = curr_node*gpus_per_node + (gpus_per_node + curr_rank-1) % gpus_per_node;
+        }
+        ring_pos++;
+    }
 
     int send_chunk = ring_pos % n_pes;
     int recv_chunk = (n_pes + ring_pos-1) % n_pes;
-
-    if (local_rank == (ring_id/2)*2)
-    {
-        send_peer = (n_pes + pe - gpus_per_node+1) % n_pes;
-        recv_peer = my_node * gpus_per_node + (local_rank - 1) % gpus_per_node;
-    }
-    else if (local_rank == (ring_id/2)*2 + 1)
-    {
-        send_peer = my_node * gpus_per_node + (local_rank + 1) % gpus_per_node;
-        recv_peer = (n_pes + pe + gpus_per_node - 1) % n_pes;
-    }
-    else
-    {
-        send_peer = my_node*gpus_per_node + (local_rank+1) % gpus_per_node;
-        recv_peer = my_node*gpus_per_node + (gpus_per_node + local_rank-1) % gpus_per_node;
-    }
-
     if(ring_id%2 == 1)
     {
         swap_cu(send_chunk, recv_chunk);
