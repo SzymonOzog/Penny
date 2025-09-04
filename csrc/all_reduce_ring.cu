@@ -55,18 +55,36 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
         int curr_rank = curr_pe%gpus_per_node;
         if (curr_rank == (ring_id/2)*2)
         {
-            send_peer = (n_pes + curr_pe - gpus_per_node+1) % n_pes;
-            recv_peer = curr_node * gpus_per_node + (gpus_per_node + curr_rank - 1) % gpus_per_node;
+            if (curr_node%2 == 1)
+            {
+                send_peer = curr_node * gpus_per_node + (gpus_per_node + curr_rank - 1) % gpus_per_node;
+                recv_peer = (n_pes + curr_pe - gpus_per_node) % n_pes;
+            }
+            else
+            {
+                send_peer = (n_pes + curr_pe + gpus_per_node) % n_pes;
+                recv_peer = curr_node * gpus_per_node + (gpus_per_node + curr_rank - 1) % gpus_per_node;
+            }
         }
         else if (curr_rank == (ring_id/2)*2 + 1)
         {
-            send_peer = curr_node * gpus_per_node + (curr_rank + 1) % gpus_per_node;
-            recv_peer = (n_pes + curr_pe + gpus_per_node - 1) % n_pes;
+            if (curr_node%2 == 1)
+            {
+                send_peer = (n_pes + curr_pe + gpus_per_node) % n_pes;
+                recv_peer = curr_node * gpus_per_node + (curr_rank + 1) % gpus_per_node;
+            }
+            else
+            {
+                send_peer = curr_node * gpus_per_node + (curr_rank + 1) % gpus_per_node;
+                recv_peer = (n_pes + curr_pe - gpus_per_node) % n_pes;
+            }
         }
         else
         {
             send_peer = curr_node*gpus_per_node + (curr_rank+1) % gpus_per_node;
             recv_peer = curr_node*gpus_per_node + (gpus_per_node + curr_rank-1) % gpus_per_node;
+            if (curr_node%2 == 1)
+                swap_cu(send_peer, recv_peer);
         }
         ring_pos++;
     }
