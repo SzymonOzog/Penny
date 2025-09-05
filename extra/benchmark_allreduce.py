@@ -39,10 +39,10 @@ def main():
         for pow in range(args.start_pow, args.start_pow + args.range):
             num = 2 ** pow
             best_time = float("inf")
-            best_confuguration = None
+            best_configuration = None
             for packet_size in args.packet_sizes:
                 for block_size in args.block_sizes:
-                    if num % (packet_size * block_size * world_size) != 0:
+                    if num % (packet_size * block_size * world_size * local_size) != 0:
                         continue
                     configuration = f"{packet_size=} {block_size=} {num=}"
 
@@ -75,7 +75,9 @@ def main():
                                   f"bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  "
                                   f"penny_time: {penny_time*1e6:.2f}us, "
                                   f"bandwidth {recv_bytes / 1e9 / penny_time :.2f} GB/s")
-            if rank == 0 and args.profile_mode == "info":
+            if rank == 0 and best_configuration is None:
+                print(f"no configuration found for {num=}")
+            elif rank == 0 and args.profile_mode == "info":
                 print(f"{configuration=} nccl time: {nccl_time*1e6:.2f}us, "
                       f"bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  "
                       f"penny_time time: {best_time*1e6:.2f}us, "
