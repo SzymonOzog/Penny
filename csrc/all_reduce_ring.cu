@@ -176,4 +176,5 @@ void all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, i
 
     nvshmemx_buffer_unregister(buffer);
     nvshmem_free(destination);
+    nvshmem_free(signal);
 }
