@@ -158,7 +158,7 @@ void all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, i
     dim3 grid_size(grid_size_x, rings, 1);
 
     uint64_t *signal = (uint64_t *) nvshmem_malloc(grid_size_x * rings * sizeof(uint64_t));
-    cudaMemset(signal, 0, grid_size_x * 2 * sizeof(uint64_t));
+    cudaMemset(signal, 0, grid_size_x * rings * sizeof(uint64_t));
     
     //sync the memset before running kernel
     nvshmemx_barrier_all_on_stream(stream);
