@@ -21,6 +21,8 @@ def main():
                         help="Relative tolerance for correctness check")
     parser.add_argument("--profile-mode", type=str, default="info",
                         help="How do you want to profile (info|verbose|file|none)")
+    parser.add_argument("--algo", type=int, default=0,
+                        help="What type of algo to use, 0 == ring, 1 == tree")
     parser.add_argument("--range", type=int, default=1,
                         help="How many sizes to profile")
     parser.add_argument("--start-pow", type=int, default=28,
@@ -42,7 +44,9 @@ def main():
             best_configuration = None
             for packet_size in args.packet_sizes:
                 for block_size in args.block_sizes:
-                    if num % (packet_size * block_size * world_size * local_size) != 0:
+                    if num % (packet_size * block_size * world_size * local_size) != 0 and args.algo == 0:
+                        continue
+                    if num % (packet_size * block_size * local_size) != 0 and args.algo == 1:
                         continue
                     configuration = f"{packet_size=} {block_size=} {num=}"
 
@@ -53,7 +57,7 @@ def main():
 
                     with record_function(configuration):
                         dist.all_reduce(data)
-                        penny_cpp.all_reduce(data2, packet_size, block_size, nnodes)
+                        penny_cpp.all_reduce(data2, packet_size, block_size, nnodes, args.algo)
 
                     if not torch.allclose(data, data2, atol=args.atol, rtol=args.rtol) and rank == 0:
                         idx = torch.isclose(data, data2, atol=args.atol, rtol=args.rtol)
@@ -64,7 +68,7 @@ def main():
 
                     if args.profile_mode == "info" or args.profile_mode == "verbose":
                         nccl_time = bench_kineto(lambda: dist.all_reduce(data), kernel_names="nccl")
-                        penny_time = bench_kineto(lambda: penny_cpp.all_reduce(data2, packet_size, block_size, nnodes),
+                        penny_time = bench_kineto(lambda: penny_cpp.all_reduce(data2, packet_size, block_size, nnodes, args.algo),
                                                   kernel_names="all_reduce")
                         if penny_time < best_time:
                             best_time = penny_time
