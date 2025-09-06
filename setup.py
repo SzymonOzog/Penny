@@ -19,6 +19,7 @@ if __name__ == '__main__':
     sources = ['csrc/torch_interface.cpp',
                "csrc/exchange.cu",
                "csrc/all_reduce_ring.cu",
+               "csrc/all_reduce_tree.cu",
                "csrc/all_reduce_double_ring.cu",
                ]
     include_dirs = ['csrc/', nvshmem_inc]
