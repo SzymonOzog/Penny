@@ -22,10 +22,13 @@ void init_with_uid(pybind11::bytearray uid_py, int rank, int world_size)
 }
 
 void all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
+void all_reduce_tree(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
 void all_reduce_double_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
 
-void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size, int nnodes)
+void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size, int nnodes, int algo)
 {
+    if (algo == 0)
+    {
     all_reduce_ring(static_cast<half*>(buffer.data_ptr()),
             buffer.numel(),
             packet_size,
@@ -33,6 +36,17 @@ void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size,
             nnodes,
             at::cuda::getCurrentCUDAStream()
             );
+    }
+    else if (algo == 1)
+    {
+        all_reduce_tree(static_cast<half*>(buffer.data_ptr()),
+                buffer.numel(),
+                packet_size,
+                block_size,
+                nnodes,
+                at::cuda::getCurrentCUDAStream()
+                );
+    }
     // all_reduce_double_ring(static_cast<half*>(buffer.data_ptr()),
     //         buffer.numel(),
     //         packet_size,
