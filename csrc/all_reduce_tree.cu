@@ -103,7 +103,7 @@ __global__ void all_reduce_tree_kernel(scalar_t *destination, scalar_t* buffer, 
                 block_size, local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer);
     }
 
-    destination += n_pes * chunk_off * gridDim.y;
+    destination += chunk_off * gridDim.y;
     local_signal += gridDim.x * gridDim.y;
 
     if (local_rank == tree_id)
