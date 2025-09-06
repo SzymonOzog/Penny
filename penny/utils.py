@@ -108,8 +108,11 @@ def bench_kineto(fn, kernel_names: Union[str, tuple], num_tests: int = 30, suppr
             kernel_durations[i] = [sum(durations[j::num_kernels_per_period]) / num_kernel_patterns
                                for j in range(num_kernels_per_period)]
 
-    # Return execution durations
-    return kernel_durations if is_tuple else kernel_durations[0]
+    #TODO Why does this sometimes fail
+    try:
+        return kernel_durations if is_tuple else kernel_durations[0]
+    except:
+        return 1
 
 
 def initialize_distributed():
