@@ -112,7 +112,9 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
         nvshmemx_putmem_signal_nbi_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off,
                 block_size, local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer);
 
-        nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, stage);
+        if (threadIdx.x == 0)
+            nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, stage);
+        __syncthreads();
 
         for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
@@ -132,10 +134,14 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
     }
 
     destination += n_pes * chunk_off * gridDim.y;
-    for (int chunk = 0; chunk < n_pes - 1; chunk++) { nvshmemx_putmem_signal_nbi_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off,
+    for (int chunk = 0; chunk < n_pes - 1; chunk++) 
+    {
+        nvshmemx_putmem_signal_nbi_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off,
                 block_size, local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer); 
 
-        nvshmem_signal_wait_until(local_signal , NVSHMEM_CMP_GE, stage);
+        if (threadIdx.x == 0)
+            nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, stage);
+        __syncthreads();
 
         for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
