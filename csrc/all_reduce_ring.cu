@@ -111,7 +111,7 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
     {
         nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off + chunk*chunk_off),
                 reinterpret_cast<float4*>(buffer + send_chunk*chunk_off + off),
-                block_size, local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer);
+                block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
 
         if (threadIdx.x == 0)
             nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, stage);
@@ -139,7 +139,8 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
     {
         nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off + chunk*chunk_off),
                 reinterpret_cast<float4*>(buffer + send_chunk*chunk_off + off),
-                block_size, local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer); 
+                block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
+
         if (threadIdx.x == 0)
             nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, stage);
         __syncthreads();
