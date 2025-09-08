@@ -29,7 +29,7 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
     using P = array_t<scalar_t, 16/sizeof(scalar_t)>;
 
     const uint64_t base_off = (blockIdx.x * blockDim.x) * packet_size/sizeof(scalar_t);
-    const uint64_t block_size = blockDim.x * packet_size;
+    const uint32_t block_size = blockDim.x * packet_size;
     const uint64_t chunk_off = (gridDim.x * blockDim.x) * packet_size/sizeof(scalar_t);
     const uint32_t ring_id = blockIdx.y;
     const uint64_t ring_off = ring_id * chunk_off * nvshmem_n_pes();
@@ -109,7 +109,8 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
     uint64_t* local_signal = signal + blockIdx.x + blockIdx.y * gridDim.x;
     for (int chunk = 0; chunk < n_pes - 1; chunk++)
     {
-        nvshmemx_putmem_signal_nbi_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off,
+        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off + chunk*chunk_off),
+                reinterpret_cast<float4*>(buffer + send_chunk*chunk_off + off),
                 block_size, local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer);
 
         if (threadIdx.x == 0)
@@ -136,9 +137,9 @@ __global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, 
     destination += n_pes * chunk_off * gridDim.y;
     for (int chunk = 0; chunk < n_pes - 1; chunk++) 
     {
-        nvshmemx_putmem_signal_nbi_block(destination + off + chunk*chunk_off, buffer + send_chunk*chunk_off + off,
+        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off + chunk*chunk_off),
+                reinterpret_cast<float4*>(buffer + send_chunk*chunk_off + off),
                 block_size, local_signal, 1, NVSHMEM_SIGNAL_ADD, send_peer); 
-
         if (threadIdx.x == 0)
             nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, stage);
         __syncthreads();
