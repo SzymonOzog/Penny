@@ -82,7 +82,7 @@ def main():
             if rank == 0 and best_configuration is None:
                 print(f"no configuration found for {num=}")
             elif rank == 0 and args.profile_mode == "info":
-                print(f"{configuration=} nccl time: {nccl_time*1e6:.2f}us, "
+                print(f"{best_configuration=} nccl time: {nccl_time*1e6:.2f}us, "
                       f"bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  "
                       f"penny_time time: {best_time*1e6:.2f}us, "
                       f"bandwidth {recv_bytes / 1e9 / best_time :.2f} GB/s")
