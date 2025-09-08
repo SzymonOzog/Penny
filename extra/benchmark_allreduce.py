@@ -10,10 +10,10 @@ from penny.utils import bench_kineto, initialize_distributed
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--packet-sizes", type=int, nargs="+",
-                        default=[64, 512, 2048],
+                        default=[2, 8, 32, 64, 128, 256, 512, 2048, 4096, 8192],
                         help="List of packet sizes to test")
     parser.add_argument("--block-sizes", type=int, nargs="+",
-                        default=[256, 512, 1024],
+                        default=[32, 128, 256, 512, 1024],
                         help="List of block sizes to test")
     parser.add_argument("--atol", type=float, default=1e-1,
                         help="Absolute tolerance for correctness check")
@@ -44,7 +44,9 @@ def main():
             best_configuration = None
             for packet_size in args.packet_sizes:
                 for block_size in args.block_sizes:
-                    if num % (packet_size * block_size * world_size * local_size) != 0 and args.algo == 0:
+                    if pow > 23 and packet_size < 32:
+                        continue
+                    if num % (packet_size * block_size * world_size) != 0 and args.algo == 0:
                         continue
                     if num % (packet_size * block_size * local_size) != 0 and args.algo == 1:
                         continue
