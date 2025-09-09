@@ -24,7 +24,7 @@ struct __align__(alignof(T) * sz) array_t {
 
 
 template <typename scalar_t, bool INTERNODE>
-__global__ void all_reduce_ring_kernel(scalar_t *destination, scalar_t* buffer, uint64_t* signal, int packet_size, int gpus_per_node) 
+__global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, uint64_t* __restrict__ signal, const int packet_size, const int gpus_per_node) 
 {
     using P = array_t<scalar_t, 16/sizeof(scalar_t)>;
 
