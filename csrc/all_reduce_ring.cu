@@ -39,16 +39,17 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
     const int n_pes = nvshmem_n_pes();
 
 
-    int send_peer = 0;
+    int send_peer;
     int recv_peer;
-
-    int curr_pe = -1;
-    int ring_pos = -1;
+    int ring_pos;
 
     if constexpr (INTERNODE)
     {
     // TODO this is currently a hack to get the ring position, since it changes a lot  
     // it's easier to find it than to derive an expression for it
+        int curr_pe = -1;
+        send_peer = 0;
+        ring_pos = -1;
         while (curr_pe != pe)
         {
             curr_pe = send_peer;
@@ -99,7 +100,7 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
 
     int send_chunk = ring_pos % n_pes;
     int recv_chunk = (n_pes + ring_pos-1) % n_pes;
-    if(ring_id%2 == 1)
+    if(ring_id%2 == 1 && INTERNODE)
     {
         swap_cu(send_chunk, recv_chunk);
         swap_cu(send_peer, recv_peer);
@@ -128,7 +129,7 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
         }
         stage++;
         send_chunk = recv_chunk;
-        if(ring_id%2 == 1)
+        if(ring_id%2 == 1 && INTERNODE)
             recv_chunk = (n_pes + recv_chunk + 1)%n_pes;
         else
             recv_chunk = (n_pes + recv_chunk - 1)%n_pes;
@@ -152,7 +153,7 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
         }
         stage++;
         send_chunk = recv_chunk;
-        if(ring_id%2 == 1)
+        if(ring_id%2 == 1 && INTERNODE)
             recv_chunk = (n_pes + recv_chunk + 1)%n_pes;
         else
             recv_chunk = (n_pes + recv_chunk - 1)%n_pes;
