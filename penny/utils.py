@@ -49,7 +49,7 @@ class suppress_stdout_stderr:
 
 # CREDIT: https://github.com/deepseek-ai/DeepEP/blob/main/deep_ep/utils.py
 def bench_kineto(fn, kernel_names: Union[str, tuple], num_tests: int = 30, suppress_kineto_output: bool = False,
-                 trace_path: Optional[str] = None, barrier_comm_profiling: bool = False,
+                 trace_path: Optional[str] = None, barrier_comm_profiling: bool = True,
                  num_kernels_per_period: int = 1):
     # Profile
     suppress = suppress_stdout_stderr if suppress_kineto_output else empty_suppress
@@ -64,6 +64,8 @@ def bench_kineto(fn, kernel_names: Union[str, tuple], num_tests: int = 30, suppr
                     lhs @ rhs
                     dist.all_reduce(torch.ones(1, dtype=torch.float, device='cuda'))
                 for _ in range(num_tests):
+                    # Alocate big tensor to clear cache
+                    _ = torch.randn((8192, 8192), dtype=torch.float, device='cuda')
                     fn()
                 prof.step()
 
@@ -71,6 +73,8 @@ def bench_kineto(fn, kernel_names: Union[str, tuple], num_tests: int = 30, suppr
     assert isinstance(kernel_names, str) or isinstance(kernel_names, tuple)
     is_tuple = isinstance(kernel_names, tuple)
     prof_lines = prof.key_averages().table(sort_by='cuda_time_total', max_name_column_width=100).split('\n')
+    # HACK remove the sync allreduce from lines
+    prof_lines = [line for line in prof_lines if "AllReduce_Sum_f32" not in line] 
     kernel_names = (kernel_names, ) if isinstance(kernel_names, str) else kernel_names
     assert all([isinstance(name, str) for name in kernel_names])
     for name in kernel_names:
