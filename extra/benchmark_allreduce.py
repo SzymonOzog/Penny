@@ -44,22 +44,24 @@ def main():
             best_configuration = None
             for packet_size in args.packet_sizes:
                 for block_size in args.block_sizes:
+                    rings = 1 if nnodes == 1 else local_size
                     if pow > 23 and packet_size < 32:
                         continue
-                    if num % (packet_size * block_size * world_size) != 0 and args.algo == 0:
+                    if num % (packet_size * block_size * world_size * rings) != 0 and args.algo == 0:
                         continue
                     if num % (packet_size * block_size * local_size) != 0 and args.algo == 1:
                         continue
-                    configuration = f"{packet_size=} {block_size=} {num=}"
+                    configuration = f"{packet_size=} {block_size=} {num=}, {rings=}"
 
                     data = torch.randn(num, device="cuda", dtype=torch.float16)
-                    data = torch.ones(num, device="cuda", dtype=torch.float16)
+                    # data = torch.ones(num, device="cuda", dtype=torch.float16)
                     data2 = data.clone()
                     recv_bytes = data2.nelement() * data2.element_size() * (world_size - 1) // world_size * 2
+                    handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, rings)
 
                     with record_function(configuration):
                         dist.all_reduce(data)
-                        penny_cpp.all_reduce(data2, packet_size, block_size, nnodes, args.algo)
+                        penny_cpp.all_reduce_run(handle)
 
                     if not torch.allclose(data, data2, atol=args.atol, rtol=args.rtol) and rank == 0:
                         idx = torch.isclose(data, data2, atol=args.atol, rtol=args.rtol)
@@ -69,9 +71,9 @@ def main():
                         print(data2[idx.logical_not()])
 
                     if args.profile_mode == "info" or args.profile_mode == "verbose":
-                        nccl_time = bench_kineto(lambda: dist.all_reduce(data), kernel_names="nccl")
-                        penny_time = bench_kineto(lambda: penny_cpp.all_reduce(data2, packet_size, block_size, nnodes, args.algo),
+                        penny_time = bench_kineto(lambda: penny_cpp.all_reduce_run(handle),
                                                   kernel_names="all_reduce")
+                        nccl_time = bench_kineto(lambda: dist.all_reduce(data), kernel_names="AllReduce_Sum_f16")
                         if penny_time < best_time:
                             best_time = penny_time
                             best_configuration = configuration
@@ -81,7 +83,9 @@ def main():
                                   f"bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  "
                                   f"penny_time: {penny_time*1e6:.2f}us, "
                                   f"bandwidth {recv_bytes / 1e9 / penny_time :.2f} GB/s")
-            if rank == 0 and best_configuration is None:
+                    penny_cpp.all_reduce_destroy(handle)
+
+            if rank == 0 and args.profile_mode == "info" and best_configuration is None:
                 print(f"no configuration found for {num=}")
             elif rank == 0 and args.profile_mode == "info":
                 print(f"{best_configuration=} nccl time: {nccl_time*1e6:.2f}us, "
@@ -99,4 +103,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
