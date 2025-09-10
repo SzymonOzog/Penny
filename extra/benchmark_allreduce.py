@@ -10,7 +10,7 @@ from penny.utils import bench_kineto, initialize_distributed
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--packet-sizes", type=int, nargs="+",
-                        default=[2, 8, 32, 64, 128, 256, 512, 2048, 4096, 8192],
+                        default=[2, 8, 16, 32, 64, 128, 256, 512, 2048],
                         help="List of packet sizes to test")
     parser.add_argument("--block-sizes", type=int, nargs="+",
                         default=[32, 128, 256, 512, 1024],
