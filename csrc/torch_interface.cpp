@@ -9,6 +9,8 @@
 #include <nvshmem.h>
 #include <nvshmemx.h>
 #include <string>
+#include <cuda_fp16.h>
+#include <cstdint>
 
 void init_with_uid(pybind11::bytearray uid_py, int rank, int world_size)
 {
@@ -21,21 +23,29 @@ void init_with_uid(pybind11::bytearray uid_py, int rank, int world_size)
     nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr);
 }
 
-void all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
+// Ring allreduce object lifecycle API
+void* create_all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream);
+void destroy_all_reduce_ring(void* all_reduce_obj);
+void all_reduce_ring(void* all_reduce_obj, cudaStream_t stream);
 void all_reduce_tree(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
 void all_reduce_double_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
 
-void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size, int nnodes, int algo)
+void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size, int nnodes, int algo, int routes)
 {
     if (algo == 0)
     {
-    all_reduce_ring(static_cast<half*>(buffer.data_ptr()),
+        auto stream = at::cuda::getCurrentCUDAStream();
+        void* handle = create_all_reduce_ring(
+            static_cast<half*>(buffer.data_ptr()),
             buffer.numel(),
             packet_size,
             block_size,
             nnodes,
-            at::cuda::getCurrentCUDAStream()
-            );
+            routes,
+            stream
+        );
+        all_reduce_ring(handle, stream);
+        destroy_all_reduce_ring(handle);
     }
     else if (algo == 1)
     {
@@ -72,4 +82,25 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("init_with_uid", &init_with_uid);
     m.def("all_reduce", &all_reduce_launcher);
     m.def("exchange", &exchange);
+
+    m.def("all_reduce_create", [](torch::Tensor& buffer, int packet_size, int block_size, int nnodes, int routes) {
+        auto stream = at::cuda::getCurrentCUDAStream();
+        void* handle = create_all_reduce_ring(
+            static_cast<half*>(buffer.data_ptr()),
+            buffer.numel(),
+            packet_size,
+            block_size,
+            nnodes,
+            routes,
+            stream
+        );
+        return reinterpret_cast<uintptr_t>(handle);
+    });
+    m.def("all_reduce_run", [](uintptr_t handle) {
+        auto stream = at::cuda::getCurrentCUDAStream();
+        all_reduce_ring(reinterpret_cast<void*>(handle), stream);
+    });
+    m.def("all_reduce_destroy", [](uintptr_t handle) {
+        destroy_all_reduce_ring(reinterpret_cast<void*>(handle));
+    });
 }

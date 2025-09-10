@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cuda.h>
 #include <cuda_fp16.h>
+#include <cmath>
 #include <nvshmem.h>
 #include <nvshmemx.h>
 
@@ -160,49 +161,81 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
     }
 }
 
-void all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream) 
+class AllReduce
 {
-    // Can we reduce te size of this buffer?
-    half *destination = (half *) nvshmem_malloc(2 * numel * sizeof(half));
-
-    nvshmemx_buffer_register(buffer, numel * sizeof(half));
-    
-    const uint32_t gpus_per_node = nvshmem_n_pes()/nnodes;
-    const uint32_t rings = nnodes > 1 ? gpus_per_node : 1;
-    const uint32_t grid_size_x = std::ceil(numel*sizeof(half) / float(packet_size*block_size*nvshmem_n_pes()*rings));
-    dim3 grid_size(grid_size_x, rings, 1);
-
-    uint64_t *signal = (uint64_t *) nvshmem_malloc(grid_size_x * rings * sizeof(uint64_t));
-    cudaMemset(signal, 0, grid_size_x * rings * sizeof(uint64_t));
-    
-    //sync the memset before running kernel
-    nvshmemx_barrier_all_on_stream(stream);
-
-    if(nnodes > 1)
+public:
+    AllReduce(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream) : packet_size(packet_size), internode(nnodes > 1)
     {
-        all_reduce_ring_kernel<half, true><<<grid_size, block_size, 0, stream>>>(
-                destination,
-                static_cast<half*>(buffer),
-                signal,
-                packet_size,
-                gpus_per_node
-                );
+        // Can we reduce te size of this buffer?
+        destination = (half *) nvshmem_malloc(2 * numel * sizeof(half));
+
+        nvshmemx_buffer_register(_buffer, numel * sizeof(half));
+        buffer = _buffer;
+        
+        gpus_per_node = nvshmem_n_pes()/nnodes;
+        const uint32_t rings = nnodes > 1 ? gpus_per_node : 1;
+        const uint32_t grid_size_x = std::ceil(numel*sizeof(half) / float(packet_size*block_size*nvshmem_n_pes()*rings));
+        grid_size = dim3(grid_size_x, rings, 1);
+        this->block_size = dim3(block_size, 1, 1);
+
+        signal = (uint64_t *) nvshmem_malloc(grid_size_x * rings * sizeof(uint64_t));
+        cudaMemset(signal, 0, grid_size_x * rings * sizeof(uint64_t));
+        
+        //sync the memset before running kernel
+        nvshmemx_barrier_all_on_stream(stream);
     }
-    else 
+    ~AllReduce()
     {
-        all_reduce_ring_kernel<half, false><<<grid_size, block_size, 0, stream>>>(
-                destination,
-                static_cast<half*>(buffer),
-                signal,
-                packet_size,
-                gpus_per_node
-                );
+        nvshmemx_buffer_unregister(buffer);
+        nvshmem_free(destination);
+        nvshmem_free(signal);
     }
 
-    nvshmemx_barrier_all_on_stream(stream);
-    cudaStreamSynchronize(stream);
+    void run(cudaStream_t stream)
+    {
+        if(internode)
+        {
+            all_reduce_ring_kernel<half, true><<<grid_size, block_size, 0, stream>>>(
+                    destination,
+                    static_cast<half*>(buffer),
+                    signal,
+                    packet_size,
+                    gpus_per_node
+                    );
+        }
+        else 
+        {
+            all_reduce_ring_kernel<half, false><<<grid_size, block_size, 0, stream>>>(
+                    destination,
+                    static_cast<half*>(buffer),
+                    signal,
+                    packet_size,
+                    gpus_per_node
+                    );
+        }
+    }
 
-    nvshmemx_buffer_unregister(buffer);
-    nvshmem_free(destination);
-    nvshmem_free(signal);
+    half* destination;
+    half* buffer;
+    uint32_t gpus_per_node;
+    dim3 grid_size;
+    dim3 block_size;
+    uint64_t *signal;
+    const int packet_size;
+    const bool internode;
+};
+
+void* create_all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream)
+{
+    return reinterpret_cast<void*>(new AllReduce(buffer, numel, packet_size, block_size, nnodes, routes, stream));
+}
+
+void destroy_all_reduce_ring(void* all_reduce_obj)
+{
+    delete reinterpret_cast<AllReduce*>(all_reduce_obj);
+}
+
+void all_reduce_ring(void* all_reduce_obj, cudaStream_t stream) 
+{
+    reinterpret_cast<AllReduce*>(all_reduce_obj)->run(stream);
 }
