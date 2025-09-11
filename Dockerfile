@@ -79,4 +79,5 @@ RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86
         && apt-get update \
         && apt-get -y install nvshmem-cuda-12
 
+RUN pip install torch torchvision
 
