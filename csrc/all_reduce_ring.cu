@@ -173,7 +173,7 @@ public:
         buffer = _buffer;
         
         gpus_per_node = nvshmem_n_pes()/nnodes;
-        const uint32_t rings = nnodes > 1 ? gpus_per_node : 1;
+        const uint32_t rings = routes;
         const uint32_t grid_size_x = std::ceil(numel*sizeof(half) / float(packet_size*block_size*nvshmem_n_pes()*rings));
         grid_size = dim3(grid_size_x, rings, 1);
         this->block_size = dim3(block_size, 1, 1);
