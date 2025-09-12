@@ -27,6 +27,8 @@ def main():
                         help="How many sizes to profile")
     parser.add_argument("--start-pow", type=int, default=28,
                         help="What power of 2 size to start from")
+    parser.add_argument("--num-tests", type=int, default=3,
+                        help="How many tests in a row to run")
 
     args = parser.parse_args()
 
@@ -44,46 +46,49 @@ def main():
             best_configuration = None
             for packet_size in args.packet_sizes:
                 for block_size in args.block_sizes:
-                    rings = 1 if nnodes == 1 else local_size
-                    if pow > 23 and packet_size < 32:
-                        continue
-                    if num % (packet_size * block_size * world_size * rings) != 0 and args.algo == 0:
-                        continue
-                    if num % (packet_size * block_size * local_size) != 0 and args.algo == 1:
-                        continue
-                    configuration = f"{packet_size=} {block_size=} {num=}, {rings=}"
+                    for rings in (range(1, 9) if nnodes > 1 else [1]):
+                    # for rings in ([1] if nnodes > 1 else [1]):
+                        if pow > 23 and packet_size < 32:
+                            continue
+                        if num % (packet_size * block_size * world_size * rings) != 0 and args.algo == 0:
+                            continue
+                        if num % (packet_size * block_size * local_size) != 0 and args.algo == 1:
+                            continue
+                        configuration = f"{packet_size=} {block_size=} {num=}, {rings=}"
 
-                    data = torch.randn(num, device="cuda", dtype=torch.float16)
-                    # data = torch.ones(num, device="cuda", dtype=torch.float16)
-                    data2 = data.clone()
-                    recv_bytes = data2.nelement() * data2.element_size() * (world_size - 1) // world_size * 2
-                    handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, rings)
+                        data = torch.randn(num, device="cuda", dtype=torch.float16)
+                        data = torch.ones(num, device="cuda", dtype=torch.float16)
+                        data2 = data.clone()
+                        recv_bytes = 2 * data2.nelement() * data2.element_size()
+                        handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, rings)
 
-                    with record_function(configuration):
-                        dist.all_reduce(data)
-                        penny_cpp.all_reduce_run(handle)
+                        for _ in range(args.num_tests):
 
-                    if not torch.allclose(data, data2, atol=args.atol, rtol=args.rtol) and rank == 0:
-                        idx = torch.isclose(data, data2, atol=args.atol, rtol=args.rtol)
-                        num_missed = idx.logical_not().sum() / idx.nelement()
-                        print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {data2.mean()}")
-                        print(data[idx.logical_not()])
-                        print(data2[idx.logical_not()])
+                            with record_function(configuration):
+                                dist.all_reduce(data)
+                                penny_cpp.all_reduce_run(handle)
 
-                    if args.profile_mode == "info" or args.profile_mode == "verbose":
-                        penny_time = bench_kineto(lambda: penny_cpp.all_reduce_run(handle),
-                                                  kernel_names="all_reduce")
-                        nccl_time = bench_kineto(lambda: dist.all_reduce(data), kernel_names="AllReduce_Sum_f16")
-                        if penny_time < best_time:
-                            best_time = penny_time
-                            best_configuration = configuration
+                            if not torch.allclose(data, data2, atol=args.atol, rtol=args.rtol) and rank == 0:
+                                idx = torch.isclose(data, data2, atol=args.atol, rtol=args.rtol)
+                                num_missed = idx.logical_not().sum() / idx.nelement()
+                                print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {data2.mean()}")
+                                print(data[idx.logical_not()])
+                                print(data2[idx.logical_not()])
 
-                        if rank == 0 and args.profile_mode == "verbose":
-                            print(f"{configuration=} nccl time: {nccl_time*1e6:.2f}us, "
-                                  f"bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  "
-                                  f"penny_time: {penny_time*1e6:.2f}us, "
-                                  f"bandwidth {recv_bytes / 1e9 / penny_time :.2f} GB/s")
-                    penny_cpp.all_reduce_destroy(handle)
+                        if args.profile_mode == "info" or args.profile_mode == "verbose":
+                            penny_time = bench_kineto(lambda: penny_cpp.all_reduce_run(handle),
+                                                      kernel_names="all_reduce")
+                            nccl_time = bench_kineto(lambda: dist.all_reduce(data), kernel_names="AllReduce_Sum_f16")
+                            if penny_time < best_time:
+                                best_time = penny_time
+                                best_configuration = configuration
+
+                            if rank == 0 and args.profile_mode == "verbose":
+                                print(f"{configuration=} nccl time: {nccl_time*1e6:.2f}us, "
+                                      f"bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  "
+                                      f"penny_time: {penny_time*1e6:.2f}us, "
+                                      f"bandwidth {recv_bytes / 1e9 / penny_time :.2f} GB/s")
+                        penny_cpp.all_reduce_destroy(handle)
 
             if rank == 0 and args.profile_mode == "info" and best_configuration is None:
                 print(f"no configuration found for {num=}")

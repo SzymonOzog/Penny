@@ -25,7 +25,7 @@ struct __align__(alignof(T) * sz) array_t {
 
 
 template <typename scalar_t, bool INTERNODE>
-__global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, uint64_t* __restrict__ signal, const int packet_size, const int gpus_per_node) 
+__global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, uint64_t* __restrict__ signal, const int packet_size, const int gpus_per_node, int stage) 
 {
     using P = array_t<scalar_t, 16/sizeof(scalar_t)>;
 
@@ -107,7 +107,6 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
         swap_cu(send_peer, recv_peer);
     }
 
-    int stage = 1;
     uint64_t* local_signal = signal + blockIdx.x + blockIdx.y * gridDim.x;
     for (int chunk = 0; chunk < n_pes - 1; chunk++)
     {
@@ -200,7 +199,8 @@ public:
                     static_cast<half*>(buffer),
                     signal,
                     packet_size,
-                    gpus_per_node
+                    gpus_per_node,
+                    stage
                     );
         }
         else 
@@ -210,9 +210,11 @@ public:
                     static_cast<half*>(buffer),
                     signal,
                     packet_size,
-                    gpus_per_node
+                    gpus_per_node,
+                    stage
                     );
         }
+        stage += 2*(nvshmem_n_pes()-1);
     }
 
     half* destination;
@@ -223,6 +225,7 @@ public:
     uint64_t *signal;
     const int packet_size;
     const bool internode;
+    int stage = 1;
 };
 
 void* create_all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream)
