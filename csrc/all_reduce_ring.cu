@@ -63,36 +63,30 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
             P res;
             for (int j = 0; j < P::size; j++)
                 res.data[j] = float(buf.data[j]) + float(dst.data[j]);
-            reinterpret_cast<P*>(buffer + off)[i] = res;
+            reinterpret_cast<P*>(destination + off)[i] = res;
         }
         nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
-                reinterpret_cast<float4*>(buffer + off),
+                reinterpret_cast<float4*>(destination + off),
                 block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
     }
 
     stage++;
 
-    if (ring_pos == n_pes - 1)
+    if (ring_pos != n_pes - 1)
     {
-        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
-                reinterpret_cast<float4*>(buffer  + off),
-                block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
-    }
-    else
-    {
-
         if (threadIdx.x == 0)
             nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, stage);
         __syncthreads();
+    }
 
-        for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
-        {
-            reinterpret_cast<P*>(buffer + off)[i] =
-                reinterpret_cast<P*>(destination + off)[i];
-        }
-        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
-                reinterpret_cast<float4*>(buffer + off),
-                block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
+    nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
+            reinterpret_cast<float4*>(destination + off),
+            block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
+
+    for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
+    {
+        reinterpret_cast<P*>(buffer + off)[i] =
+            reinterpret_cast<P*>(destination + off)[i];
     }
 }
 
