@@ -46,13 +46,15 @@ def main():
             best_configuration = None
             for packet_size in args.packet_sizes:
                 for block_size in args.block_sizes:
-                    for rings in (range(1, 9) if nnodes > 1 else [1]):
-                    # for rings in ([1] if nnodes > 1 else [1]):
+                    # for rings in (range(1, 9) if nnodes > 1 else [1]):
+                    for rings in ([1] if nnodes > 1 else [1]):
                         if pow > 23 and packet_size < 32:
                             continue
                         if num % (packet_size * block_size * world_size * rings) != 0 and args.algo == 0:
                             continue
                         if num % (packet_size * block_size * local_size) != 0 and args.algo == 1:
+                            continue
+                        if num % (packet_size * block_size * rings) != 0 and args.algo == 2:
                             continue
                         configuration = f"{packet_size=} {block_size=} {num=}, {rings=}"
 
@@ -60,7 +62,7 @@ def main():
                         data = torch.ones(num, device="cuda", dtype=torch.float16)
                         data2 = data.clone()
                         recv_bytes = 2 * data2.nelement() * data2.element_size()
-                        handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, rings)
+                        handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, rings, args.algo)
 
                         for _ in range(args.num_tests):
 
