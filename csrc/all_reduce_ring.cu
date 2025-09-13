@@ -57,7 +57,7 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
     else 
     {
         if (threadIdx.x == 0)
-            nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, recv_stage);
+            nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_EQ, recv_stage);
         __syncthreads();
         recv_stage++;
 
@@ -68,10 +68,10 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
             P res;
             for (int j = 0; j < P::size; j++)
                 res.data[j] = float(buf.data[j]) + float(dst.data[j]);
-            reinterpret_cast<P*>(destination + off)[i] = res;
+            reinterpret_cast<P*>(buffer + off)[i] = res;
         }
         nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
-                reinterpret_cast<float4*>(destination + off),
+                reinterpret_cast<float4*>(buffer + off),
                 block_size, local_signal, send_stage, NVSHMEM_SIGNAL_SET, send_peer);
         send_stage++;
     }
@@ -80,19 +80,19 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
     if (ring_pos != n_pes - 1)
     {
         if (threadIdx.x == 0)
-            nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, recv_stage);
+            nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_EQ, recv_stage);
         __syncthreads();
-    }
 
-    if (ring_pos < n_pes - 2)
-        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
-                reinterpret_cast<float4*>(destination + off),
-                block_size, local_signal, send_stage, NVSHMEM_SIGNAL_SET, send_peer);
+       if (ring_pos < n_pes - 2)
+            nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
+                    reinterpret_cast<float4*>(destination + off),
+                    block_size, local_signal, send_stage, NVSHMEM_SIGNAL_SET, send_peer);
 
-    for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
-    {
-        reinterpret_cast<P*>(buffer + off)[i] =
-            reinterpret_cast<P*>(destination + off)[i];
+        for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
+        {
+            reinterpret_cast<P*>(buffer + off)[i] =
+                reinterpret_cast<P*>(destination + off)[i];
+        }
     }
 }
 
