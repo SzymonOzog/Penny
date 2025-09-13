@@ -44,17 +44,22 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
     int recv_chunk = (n_pes + ring_pos-1) % n_pes;
 
     uint64_t* local_signal = signal + blockIdx.x + blockIdx.y * gridDim.x;
+    int send_stage = stage;
+    int recv_stage = stage;
+
     if (ring_pos == 0)
     {
         nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
                 reinterpret_cast<float4*>(buffer + off),
-                block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
+                block_size, local_signal, send_stage, NVSHMEM_SIGNAL_SET, send_peer);
+        send_stage++;
     }
     else 
     {
         if (threadIdx.x == 0)
-            nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, stage);
+            nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, recv_stage);
         __syncthreads();
+        recv_stage++;
 
         for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
@@ -67,21 +72,22 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
         }
         nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
                 reinterpret_cast<float4*>(destination + off),
-                block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
+                block_size, local_signal, send_stage, NVSHMEM_SIGNAL_SET, send_peer);
+        send_stage++;
     }
 
-    stage++;
 
     if (ring_pos != n_pes - 1)
     {
         if (threadIdx.x == 0)
-            nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, stage);
+            nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_GE, recv_stage);
         __syncthreads();
     }
 
-    nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
-            reinterpret_cast<float4*>(destination + off),
-            block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
+    if (ring_pos < n_pes - 2)
+        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
+                reinterpret_cast<float4*>(destination + off),
+                block_size, local_signal, send_stage, NVSHMEM_SIGNAL_SET, send_peer);
 
     for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
     {
