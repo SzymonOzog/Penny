@@ -24,7 +24,7 @@ struct __align__(alignof(T) * sz) array_t {
   static constexpr int size = sz;
 };
 
-template <typename scalar_t>
+template <typename scalar_t, bool INTERNODE>
 __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, uint64_t* __restrict__ signal,
         const int packet_size, const int gpus_per_node, int stage)
 {
@@ -36,12 +36,65 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
     const int pe = nvshmem_my_pe();
     const int n_pes = nvshmem_n_pes();
 
-    int send_peer = (pe+1) % n_pes;
-    int recv_peer = (n_pes + pe-1) % n_pes;
-    int ring_pos = pe;
+    int send_peer;
+    int recv_peer;
+    int ring_pos;
 
-    int send_chunk = ring_pos % n_pes;
-    int recv_chunk = (n_pes + ring_pos-1) % n_pes;
+    if constexpr (INTERNODE)
+    {
+    // TODO this is currently a hack to get the ring position, since it changes a lot
+    // it's easier to find it than to derive an expression for it
+        int ring_id =0;
+        int curr_pe = -1;
+        send_peer = 0;
+        ring_pos = -1;
+        while (curr_pe != pe)
+        {
+            curr_pe = send_peer;
+            int curr_node = curr_pe/gpus_per_node;
+            int curr_rank = curr_pe%gpus_per_node;
+            if (curr_rank == (ring_id/2)*2)
+            {
+                if (curr_node%2 == 1)
+                {
+                    send_peer = curr_node * gpus_per_node + (gpus_per_node + curr_rank - 1) % gpus_per_node;
+                    recv_peer = (n_pes + curr_pe - gpus_per_node) % n_pes;
+                }
+                else
+                {
+                    send_peer = (n_pes + curr_pe + gpus_per_node) % n_pes;
+                    recv_peer = curr_node * gpus_per_node + (gpus_per_node + curr_rank - 1) % gpus_per_node;
+                }
+            }
+            else if (curr_rank == (ring_id/2)*2 + 1)
+            {
+                if (curr_node%2 == 1)
+                {
+                    send_peer = (n_pes + curr_pe + gpus_per_node) % n_pes;
+                    recv_peer = curr_node * gpus_per_node + (curr_rank + 1) % gpus_per_node;
+                }
+                else
+                {
+                    send_peer = curr_node * gpus_per_node + (curr_rank + 1) % gpus_per_node;
+                    recv_peer = (n_pes + curr_pe - gpus_per_node) % n_pes;
+                }
+            }
+            else
+            {
+                send_peer = curr_node*gpus_per_node + (curr_rank+1) % gpus_per_node;
+                recv_peer = curr_node*gpus_per_node + (gpus_per_node + curr_rank-1) % gpus_per_node;
+                if (curr_node%2 == 1)
+                    swap_cu(send_peer, recv_peer);
+            }
+            ring_pos++;
+        }
+    }
+    else 
+    {
+        send_peer = (pe+1) % n_pes;
+        recv_peer = (n_pes + pe-1) % n_pes;
+        ring_pos = pe;
+    }
 
     uint64_t* local_signal = signal + blockIdx.x + blockIdx.y * gridDim.x;
     int send_stage = stage;
@@ -306,14 +359,29 @@ public:
         }
         else if (ring_type == RingType::simple)
         {
-            all_reduce_simple_ring_kernel<half><<<grid_size, block_size, 0, stream>>>(
-                    destination,
-                    static_cast<half*>(buffer),
-                    signal,
-                    packet_size,
-                    gpus_per_node,
-                    stage
-                    );
+            if(internode)
+            {
+                all_reduce_simple_ring_kernel<half, true><<<grid_size, block_size, 0, stream>>>(
+                        destination,
+                        static_cast<half*>(buffer),
+                        signal,
+                        packet_size,
+                        gpus_per_node,
+                        stage
+                        );
+            }
+            else
+            {
+                all_reduce_simple_ring_kernel<half, false><<<grid_size, block_size, 0, stream>>>(
+                        destination,
+                        static_cast<half*>(buffer),
+                        signal,
+                        packet_size,
+                        gpus_per_node,
+                        stage
+                        );
+            
+            }
             stage+=2;
         }
     }
