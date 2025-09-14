@@ -38,6 +38,8 @@ def main():
     nnodes = int(os.getenv("NNODES", "1"))
     local_size = world_size // nnodes
     local_rank = rank % local_size
+    # float16
+    elem_size = 2
 
     def run_benchmark():
         for pow in range(args.start_pow, args.start_pow + args.range):
@@ -50,11 +52,11 @@ def main():
                     for rings in ([1] if nnodes > 1 else [1]):
                         if pow > 23 and packet_size < 32:
                             continue
-                        if num % (packet_size * block_size * world_size * rings) != 0 and args.algo == 0:
+                        if (num * elem_size) % (packet_size * block_size * world_size * rings) != 0 and args.algo == 0:
                             continue
-                        if num % (packet_size * block_size * local_size) != 0 and args.algo == 1:
+                        if (num * elem_size) % (packet_size * block_size * local_size) != 0 and args.algo == 1:
                             continue
-                        if num % (packet_size * block_size * rings) != 0 and args.algo == 2:
+                        if (num * elem_size) % (packet_size * block_size * rings) != 0 and args.algo == 2:
                             continue
                         configuration = f"{packet_size=} {block_size=} {num=}, {rings=}"
 
