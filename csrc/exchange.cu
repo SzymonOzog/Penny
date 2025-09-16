@@ -11,23 +11,25 @@
 template <typename scalar_t>
 __global__ void exchange(scalar_t *destination, scalar_t* buffer, uint64_t* signal, int peer, int packet_size) 
 {
-    const uint64_t off = (blockIdx.x * blockDim.x ) * packet_size/sizeof(scalar_t);
+    const uint64_t off = (blockIdx.x * blockDim.x) * packet_size/sizeof(scalar_t);
     const uint64_t block_size = blockDim.x * packet_size;
 
-    nvshmemx_putmem_signal_block(destination + off, buffer + off, block_size, signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, peer);
-    
+    constexpr uint64_t SIG_SYNC = 1;
+    nvshmemx_putmem_signal_block(destination + off, buffer + off, block_size, signal + blockIdx.x, SIG_SYNC, NVSHMEM_SIGNAL_SET, peer);
     // nvshmemx_putmem_block(destination + off, buffer + off, block_size, peer);
     // nvshmem_fence();
     // __syncthreads();
+    //
     // if (threadIdx.x == 0)
     // {
-    //     nvshmemx_signal_op(signal + blockIdx.x, 1, NVSHMEM_SIGNAL_ADD, peer);
+    //     nvshmemx_signal_op(signal + blockIdx.x, SIG_SYNC, NVSHMEM_SIGNAL_SET, peer);
     // }
+    if (threadIdx.x == 0)
+        nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_EQ, SIG_SYNC);
+    __syncthreads();
 
-    nvshmem_signal_wait_until(signal + blockIdx.x, NVSHMEM_CMP_GE, 1);
-
-    const uint64_t thread_off = threadIdx.x * packet_size/sizeof(scalar_t);
-    memcpy(buffer + off + thread_off, destination+off+thread_off, packet_size);
+    for (int i = threadIdx.x; i < block_size/(sizeof(float4)); i += blockDim.x)
+        reinterpret_cast<float4*>(buffer +off)[i] = reinterpret_cast<float4*>(destination + off)[i];
 }
 
 void exchange(torch::Tensor& buffer, int packet_size, int block_size, int peer) 
@@ -53,6 +55,8 @@ void exchange(torch::Tensor& buffer, int packet_size, int block_size, int peer)
             packet_size);
 
     nvshmemx_barrier_all_on_stream(stream);
+    // cudaMemcpyAsync(buffer.data_ptr(), (void*)destination, buffer.numel() * sizeof(half), cudaMemcpyDeviceToDevice, stream);
+
     cudaStreamSynchronize(stream);
 
     nvshmemx_buffer_unregister(buffer.data_ptr());
