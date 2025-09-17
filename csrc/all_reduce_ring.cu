@@ -45,8 +45,8 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
 
     if (ring_pos == 0)
     {
-        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
-                reinterpret_cast<float4*>(buffer + off),
+        nvshmemx_putmem_signal_nbi_block(destination + off,
+                buffer + off,
                 block_size, local_signal, send_stage, NVSHMEM_SIGNAL_SET, send_peer);
         send_stage++;
     }
@@ -66,8 +66,8 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
                 res.data[j] = float(buf.data[j]) + float(dst.data[j]);
             reinterpret_cast<P*>(buffer + off)[i] = res;
         }
-        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
-                reinterpret_cast<float4*>(buffer + off),
+        nvshmemx_putmem_signal_nbi_block(destination + off,
+                buffer + off,
                 block_size, local_signal, send_stage, NVSHMEM_SIGNAL_SET, send_peer);
         send_stage++;
     }
@@ -80,8 +80,8 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
         __syncthreads();
 
        if (ring_pos < n_pes - 2)
-            nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off),
-                    reinterpret_cast<float4*>(destination + off),
+            nvshmemx_putmem_signal_nbi_block(destination + off,
+                    destination + off,
                     block_size, local_signal, send_stage, NVSHMEM_SIGNAL_SET, send_peer);
 
         for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
@@ -179,8 +179,8 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
     uint64_t* local_signal = signal + blockIdx.x + blockIdx.y * gridDim.x;
     for (int chunk = 0; chunk < n_pes - 1; chunk++)
     {
-        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off + send_chunk*chunk_off),
-                reinterpret_cast<float4*>(buffer + send_chunk*chunk_off + off),
+        nvshmemx_putmem_signal_nbi_block(destination + off + send_chunk*chunk_off,
+                buffer + send_chunk*chunk_off + off,
                 block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
 
         if (threadIdx.x == 0)
@@ -206,8 +206,8 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
 
     for (int chunk = 0; chunk < n_pes - 1; chunk++) 
     {
-        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off + send_chunk*chunk_off),
-                reinterpret_cast<float4*>(buffer + send_chunk*chunk_off + off),
+        nvshmemx_putmem_signal_nbi_block(destination + off + send_chunk*chunk_off,
+                buffer + send_chunk*chunk_off + off,
                 block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
 
         if (threadIdx.x == 0)
