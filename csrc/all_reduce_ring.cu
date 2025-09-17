@@ -183,7 +183,7 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
     uint64_t* local_signal = signal + blockIdx.x + blockIdx.y * gridDim.x;
     for (int chunk = 0; chunk < n_pes - 1; chunk++)
     {
-        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off + chunk*chunk_off),
+        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off + send_chunk*chunk_off),
                 reinterpret_cast<float4*>(buffer + send_chunk*chunk_off + off),
                 block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
 
@@ -194,7 +194,7 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
         for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
             P buf = reinterpret_cast<P*>(buffer + recv_chunk*chunk_off + off)[i];
-            P dst = reinterpret_cast<P*>(destination + off+ chunk*chunk_off)[i];
+            P dst = reinterpret_cast<P*>(destination + off+ recv_chunk*chunk_off)[i];
             P res;
             for (int j = 0; j < P::size; j++)
                 res.data[j] = float(buf.data[j]) + float(dst.data[j]);
@@ -208,10 +208,9 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
             recv_chunk = (n_pes + recv_chunk - 1)%n_pes;
     }
 
-    destination += n_pes * chunk_off * gridDim.y;
     for (int chunk = 0; chunk < n_pes - 1; chunk++) 
     {
-        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off + chunk*chunk_off),
+        nvshmemx_putmem_signal_nbi_block(reinterpret_cast<float4*>(destination + off + send_chunk*chunk_off),
                 reinterpret_cast<float4*>(buffer + send_chunk*chunk_off + off),
                 block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
 
@@ -222,7 +221,7 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
         for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
             reinterpret_cast<P*>(buffer + recv_chunk*chunk_off + off)[i] =
-                reinterpret_cast<P*>(destination + off+ chunk*chunk_off)[i];
+                reinterpret_cast<P*>(destination + off+ recv_chunk*chunk_off)[i];
         }
         stage++;
         send_chunk = recv_chunk;
@@ -242,8 +241,7 @@ public:
         ring_type(_ring_type)
 
     {
-        // Can we reduce te size of this buffer?
-        destination = (half *) nvshmem_malloc(2 * numel * sizeof(half));
+        destination = (half *) nvshmem_malloc(numel * sizeof(half));
 
         nvshmemx_buffer_register(_buffer, numel * sizeof(half));
         buffer = _buffer;
