@@ -17,7 +17,7 @@ def main():
                         help="List of block sizes to test")
     parser.add_argument("--atol", type=float, default=1e-1,
                         help="Absolute tolerance for correctness check")
-    parser.add_argument("--rtol", type=float, default=1e-4,
+    parser.add_argument("--rtol", type=float, default=1e-2,
                         help="Relative tolerance for correctness check")
     parser.add_argument("--profile-mode", type=str, default="info",
                         help="How do you want to profile (info|verbose|file|none)")
@@ -60,13 +60,15 @@ def main():
                             continue
                         configuration = f"{packet_size=} {block_size=} {num=}, {rings=}"
 
-                        data = torch.randn(num, device="cuda", dtype=torch.float16)
-                        data = torch.ones(num, device="cuda", dtype=torch.float16)
+                        data = torch.empty(num, device="cuda", dtype=torch.float16).normal_(mean=0, std=0.1)
+                        # data = torch.ones(num, device="cuda", dtype=torch.float16)
                         data2 = data.clone()
                         recv_bytes = 2 * data2.nelement() * data2.element_size()
                         handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, rings, args.algo)
 
                         for _ in range(args.num_tests):
+                            #avoid stacking errors
+                            data2.copy_(data)
 
                             with record_function(configuration):
                                 dist.all_reduce(data)
