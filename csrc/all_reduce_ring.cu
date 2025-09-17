@@ -37,13 +37,9 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
     const int n_pes = nvshmem_n_pes();
 
     int send_peer = (pe+1) % n_pes;
-    int recv_peer = (n_pes + pe-1) % n_pes;
     int ring_pos = pe;
 
-    int send_chunk = ring_pos % n_pes;
-    int recv_chunk = (n_pes + ring_pos-1) % n_pes;
-
-    uint64_t* local_signal = signal + blockIdx.x + blockIdx.y * gridDim.x;
+    uint64_t* local_signal = signal + blockIdx.x;
     int send_stage = stage;
     int recv_stage = stage;
 
