@@ -5,6 +5,8 @@ import os
 import penny_cpp
 from torch.profiler import profile, ProfilerActivity, record_function
 from penny.utils import bench_kineto, initialize_distributed
+os.environ["NVSHMEM_IBGDA_NUM_RC_PER_PE"] = "128"
+os.environ["NVSHMEM_IB_ENABLE_IBGDA"] = "1"
 
 
 def main():
