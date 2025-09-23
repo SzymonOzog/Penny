@@ -47,10 +47,9 @@ class suppress_stdout_stderr:
         self.errnull_file.close()
 
 
-# CREDIT: https://github.com/deepseek-ai/DeepEP/blob/main/deep_ep/utils.py
-def bench_kineto(fn, kernel_names: Union[str, tuple], num_tests: int = 30, suppress_kineto_output: bool = False,
-                 trace_path: Optional[str] = None, barrier_comm_profiling: bool = True,
-                 num_kernels_per_period: int = 1):
+# Adapted from: https://github.com/deepseek-ai/DeepEP/blob/main/deep_ep/utils.py
+def bench_kineto(fn, kernel_name: str, num_tests: int = 30, suppress_kineto_output: bool = False,
+                 barrier_comm_profiling: bool = True):
     # Profile
     suppress = suppress_stdout_stderr if suppress_kineto_output else empty_suppress
     with suppress():
@@ -65,58 +64,21 @@ def bench_kineto(fn, kernel_names: Union[str, tuple], num_tests: int = 30, suppr
                     dist.all_reduce(torch.ones(1, dtype=torch.float, device='cuda'))
                 for _ in range(num_tests):
                     # Alocate big tensor to clear cache
-                    _ = torch.randn((8192, 8192), dtype=torch.float, device='cuda')
+                    x = torch.randn((8192, 8192), dtype=torch.float, device='cuda')
                     fn()
                 prof.step()
 
     # Parse the profiling table
-    assert isinstance(kernel_names, str) or isinstance(kernel_names, tuple)
-    is_tuple = isinstance(kernel_names, tuple)
-    prof_lines = prof.key_averages().table(sort_by='cuda_time_total', max_name_column_width=100).split('\n')
-    # HACK remove the sync allreduce from lines
-    prof_lines = [line for line in prof_lines if "AllReduce_Sum_f32" not in line] 
-    kernel_names = (kernel_names, ) if isinstance(kernel_names, str) else kernel_names
-    assert all([isinstance(name, str) for name in kernel_names])
-    for name in kernel_names:
-        assert sum([name in line for line in prof_lines]) == 1, f'Errors of the kernel {name} in the profiling table'
-
-    # Save chrome traces
-    if trace_path is not None:
-        prof.export_chrome_trace(trace_path)
-
-    # Return average kernel durations
-    units = {'ms': 1e3, 'us': 1e6}
-    kernel_durations = []
-    for name in kernel_names:
-        for line in prof_lines:
-            if name in line:
-                time_str = line.split()[-2]
-                for unit, scale in units.items():
-                    if unit in time_str:
-                        kernel_durations.append(float(time_str.replace(unit, '')) / scale)
-                        break
-                break
-
-    # Expand the kernels by periods
-    if num_kernels_per_period > 1:
-        with tempfile.NamedTemporaryFile(suffix='.json') as tmp:
-            prof.export_chrome_trace(tmp.name)
-            profile_data = json.loads(Path(tmp.name).read_text())
-
-        for i, kernel_name in enumerate(kernel_names):
-            events = [event for event in profile_data['traceEvents'] if f'::{kernel_name}' in event['name']]
-            events = sorted(events, key=lambda event: event['ts'])
-            durations = [event['dur'] / 1e6 for event in events]
-            assert len(durations) % num_kernels_per_period == 0
-            num_kernel_patterns = len(durations) // num_kernels_per_period
-            kernel_durations[i] = [sum(durations[j::num_kernels_per_period]) / num_kernel_patterns
-                               for j in range(num_kernels_per_period)]
-
-    #TODO Why does this sometimes fail
-    try:
-        return kernel_durations if is_tuple else kernel_durations[0]
-    except:
-        return 1
+    times = []
+    for e in prof.profiler.function_events:
+        # HACK remove the sync allreduce from lines
+        if kernel_name in e.name and "AllReduce_Sum_f32" not in e.name:
+            times.append(e.device_time_total)
+    # Remove outliers
+    # TODO investigate where are they coming from
+    median = list(sorted(times))[len(times)//2]
+    times = [t for t in times if 0.5 < t/median < 1.5]
+    return sum(times)/len(times)
 
 
 def initialize_distributed():

@@ -85,26 +85,27 @@ def main():
 
                         if args.profile_mode == "info" or args.profile_mode == "verbose":
                             penny_time = bench_kineto(lambda: penny_cpp.all_reduce_run(handle),
-                                                      kernel_names="all_reduce")
-                            nccl_time = bench_kineto(lambda: dist.all_reduce(data), kernel_names="AllReduce_Sum_f16")
+                                                      kernel_name="all_reduce")
+                            nccl_time = bench_kineto(lambda: dist.all_reduce(data), kernel_name="AllReduce_Sum_f16")
+
                             if penny_time < best_time:
                                 best_time = penny_time
                                 best_configuration = configuration
 
                             if rank == 0 and args.profile_mode == "verbose":
-                                print(f"{configuration=} nccl time: {nccl_time*1e6:.2f}us, "
-                                      f"bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  "
-                                      f"penny_time: {penny_time*1e6:.2f}us, "
-                                      f"bandwidth {recv_bytes / 1e9 / penny_time :.2f} GB/s")
+                                print(f"{configuration=} nccl time: {nccl_time:.2f}us, "
+                                      f"bandwidth {recv_bytes / 1e3 / nccl_time :.2f} GB/s  "
+                                      f"penny_time: {penny_time:.2f}us, "
+                                      f"bandwidth {recv_bytes / 1e3 / penny_time :.2f} GB/s")
                         penny_cpp.all_reduce_destroy(handle)
 
             if rank == 0 and args.profile_mode == "info" and best_configuration is None:
                 print(f"no configuration found for {num=}")
             elif rank == 0 and args.profile_mode == "info":
-                print(f"{best_configuration=} nccl time: {nccl_time*1e6:.2f}us, "
-                      f"bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  "
-                      f"penny_time time: {best_time*1e6:.2f}us, "
-                      f"bandwidth {recv_bytes / 1e9 / best_time :.2f} GB/s")
+                print(f"{best_configuration=} nccl time: {nccl_time:.2f}us, "
+                      f"bandwidth {recv_bytes / 1e3 / nccl_time :.2f} GB/s  "
+                      f"penny_time time: {best_time:.2f}us, "
+                      f"bandwidth {recv_bytes / 1e3 / best_time :.2f} GB/s")
 
     if args.profile_mode == "file" and rank == 0:
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:

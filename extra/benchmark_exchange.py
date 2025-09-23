@@ -52,10 +52,10 @@ for mode in ["internode", "intranode"]:
                     num_missed =  idx.logical_not().sum() / idx.nelement()
                     print(f"failed {configuration=} {rank=}, {num_missed=}")
 
-            nccl_time =  bench_kineto(lambda: dist.batch_isend_irecv(ops), kernel_names="nccl")
+            nccl_time =  bench_kineto(lambda: dist.batch_isend_irecv(ops), kernel_name="nccl")
             penny_time = bench_kineto(lambda: penny_cpp.exchange(data2, packet_size, block_size, src), "exchange")
 
 
             if rank == 0:
                 recv_bytes = data2.nelement() * data2.element_size() * 2
-                print(f"{configuration=} nccl time: {nccl_time*1e6:.2f}us, bandwidth {recv_bytes / 1e9 / nccl_time :.2f} GB/s  penny_time: {penny_time*1e6:.2f}, bandwidth {recv_bytes / 1e9 / penny_time :.2f} GB")
+                print(f"{configuration=} nccl time: {nccl_time:.2f}us, bandwidth {recv_bytes / 1e3 / nccl_time :.2f} GB/s  penny_time: {penny_time:.2f}, bandwidth {recv_bytes / 1e3 / penny_time :.2f} GB")
