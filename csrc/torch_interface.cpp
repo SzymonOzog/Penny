@@ -43,7 +43,7 @@ void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size,
             block_size,
             nnodes,
             routes,
-            RingType::standard,
+            AlgoType::ring_standard,
             stream
         );
         all_reduce_ring(handle, stream);
@@ -69,7 +69,7 @@ void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size,
             block_size,
             nnodes,
             routes,
-            RingType::simple,
+            AlgoType::ring_simple,
             stream
         );
         all_reduce_ring(handle, stream);
@@ -106,7 +106,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
             block_size,
             nnodes,
             routes,
-            RingType::standard,
+            AlgoType::ring_standard,
             stream
         );
     }
@@ -123,7 +123,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
             block_size,
             nnodes,
             routes,
-            RingType::simple,
+            AlgoType::ring_simple,
             stream
         );
     }

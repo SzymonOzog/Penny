@@ -2,7 +2,7 @@
 #include <cuda_fp16.h>
 #include "host/nvshmem_api.h"
 #include "host/nvshmemx_api.h"
-enum class RingType { simple, standard };
+enum class AlgoType { ring_simple, ring_standard };
 
 template <typename T> __device__ __forceinline__ void swap_cu(T& a, T& b)
 {
@@ -72,16 +72,18 @@ public:
     const bool internode;
 };
 
-inline void* create_all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, RingType ring_type, cudaStream_t stream)
 {
-    if (ring_type == RingType::simple)
+inline void* create_all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, AlgoType algo_type, cudaStream_t stream)
+{
+    if (algo_type == AlgoType::ring_simple)
     {
         return reinterpret_cast<void*>(new AllReduceRingSimple(buffer, numel, packet_size, block_size, nnodes, routes, stream));
     }
-    else 
+    else if (algo_type == AlgoType::ring_standard)
     {
         return reinterpret_cast<void*>(new AllReduceRingStandard(buffer, numel, packet_size, block_size, nnodes, routes, stream));
     }
+    return nullptr;
 }
 
 inline void destroy_all_reduce_ring(void* all_reduce_obj)
