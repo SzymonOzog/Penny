@@ -18,7 +18,8 @@ if __name__ == '__main__':
     nvcc_flags = ['-O3', '-Xcompiler', '-O3', '-rdc=true']
     sources = ['csrc/torch_interface.cpp',
                "csrc/exchange.cu",
-               "csrc/all_reduce_ring.cu",
+               "csrc/all_reduce_ring_standard.cu",
+               "csrc/all_reduce_ring_simple.cu",
                "csrc/all_reduce_tree.cu",
                "csrc/all_reduce_double_ring.cu",
                ]

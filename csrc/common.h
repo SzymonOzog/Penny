@@ -4,6 +4,20 @@
 #include "host/nvshmemx_api.h"
 enum class RingType { simple, standard };
 
+template <typename T> __device__ __forceinline__ void swap_cu(T& a, T& b)
+{
+    T c(a); a=b; b=c;
+}
+
+// like std::array, but aligned
+// goal: generate ld.128 and st.128 instructions
+template <typename T, int sz>
+struct __align__(alignof(T) * sz) array_t {
+  T data[sz];
+  using type = T;
+  static constexpr int size = sz;
+};
+
 class AllReduce
 {
 public:
@@ -43,3 +57,39 @@ public:
     int stage = 1;
 };
 
+class AllReduceRingSimple : public AllReduce
+{
+public:
+    AllReduceRingSimple(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream);
+    virtual void run(cudaStream_t stream) override;
+};
+
+class AllReduceRingStandard : public AllReduce
+{
+public:
+    AllReduceRingStandard(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream);
+    virtual void run(cudaStream_t stream) override;
+    const bool internode;
+};
+
+inline void* create_all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, RingType ring_type, cudaStream_t stream)
+{
+    if (ring_type == RingType::simple)
+    {
+        return reinterpret_cast<void*>(new AllReduceRingSimple(buffer, numel, packet_size, block_size, nnodes, routes, stream));
+    }
+    else 
+    {
+        return reinterpret_cast<void*>(new AllReduceRingStandard(buffer, numel, packet_size, block_size, nnodes, routes, stream));
+    }
+}
+
+inline void destroy_all_reduce_ring(void* all_reduce_obj)
+{
+    delete reinterpret_cast<AllReduce*>(all_reduce_obj);
+}
+
+inline void all_reduce_ring(void* all_reduce_obj, cudaStream_t stream) 
+{
+    reinterpret_cast<AllReduce*>(all_reduce_obj)->run(stream);
+}
