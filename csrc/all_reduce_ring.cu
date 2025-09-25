@@ -228,79 +228,46 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
     }
 }
 
-class AllReduce
+class AllReduceRingSimple : public AllReduce
 {
 public:
-    AllReduce(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, RingType _ring_type, cudaStream_t stream) :
-        packet_size(packet_size),
-        internode(nnodes > 1),
-        ring_type(_ring_type)
-
+    AllReduceRingSimple(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream)
+        : AllReduce(_buffer, numel, packet_size, block_size, nnodes,
+                std::ceil(numel*sizeof(half) / float(packet_size*block_size*routes)) * routes, stream)
     {
-        destination = (half *) nvshmem_malloc(numel * sizeof(half));
-
-        nvshmemx_buffer_register(_buffer, numel * sizeof(half));
-        buffer = _buffer;
-        
-        gpus_per_node = nvshmem_n_pes()/nnodes;
-        const uint32_t rings = routes;
-
-        uint32_t grid_size_x;
-        if(ring_type == RingType::standard)
-        {
-            grid_size_x = std::ceil(numel*sizeof(half) / float(packet_size*block_size*nvshmem_n_pes()*rings));
-        }
-        else if (ring_type == RingType::simple)
-        {
-            grid_size_x = std::ceil(numel*sizeof(half) / float(packet_size*block_size*rings));
-        }
-        grid_size = dim3(grid_size_x, rings, 1);
-        this->block_size = dim3(block_size, 1, 1);
-
-        signal = (uint64_t *) nvshmem_malloc(grid_size_x * rings * sizeof(uint64_t));
-        cudaMemset(signal, 0, grid_size_x * rings * sizeof(uint64_t));
-        
-        //sync the memset before running kernel
-        nvshmemx_barrier_all_on_stream(stream);
+        grid_dim.x = std::ceil(numel*sizeof(half) / float(packet_size*block_size*routes));
+        grid_dim.y = routes;
     }
-    ~AllReduce()
+    virtual void run(cudaStream_t stream) override
     {
-        nvshmemx_buffer_unregister(buffer);
-        nvshmem_free(destination);
-        nvshmem_free(signal);
+        all_reduce_simple_ring_kernel<half><<<grid_dim, block_dim, 0, stream>>>(
+                destination,
+                static_cast<half*>(buffer),
+                signal,
+                packet_size,
+                gpus_per_node,
+                stage
+                );
+        stage+=2;
     }
+};
 
-    void run(cudaStream_t stream)
+class AllReduceRingStandard : public AllReduce
+{
+public:
+    AllReduceRingStandard(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream)
+        : AllReduce(_buffer, numel, packet_size, block_size, nnodes,
+                std::ceil(numel*sizeof(half) / float(packet_size*block_size*nvshmem_n_pes()*routes)) * routes, stream),
+        internode(nnodes > 1)
     {
-        if(ring_type == RingType::standard)
+        grid_dim.x = std::ceil(numel*sizeof(half) / float(packet_size*block_size*nvshmem_n_pes()*routes));
+        grid_dim.y = routes;
+    }
+    virtual void run(cudaStream_t stream) override
+    {
+        if(internode)
         {
-            if(internode)
-            {
-                all_reduce_ring_kernel<half, true><<<grid_size, block_size, 0, stream>>>(
-                        destination,
-                        static_cast<half*>(buffer),
-                        signal,
-                        packet_size,
-                        gpus_per_node,
-                        stage
-                        );
-            }
-            else 
-            {
-                all_reduce_ring_kernel<half, false><<<grid_size, block_size, 0, stream>>>(
-                        destination,
-                        static_cast<half*>(buffer),
-                        signal,
-                        packet_size,
-                        gpus_per_node,
-                        stage
-                        );
-            }
-            stage += 2*(nvshmem_n_pes()-1);
-        }
-        else if (ring_type == RingType::simple)
-        {
-            all_reduce_simple_ring_kernel<half><<<grid_size, block_size, 0, stream>>>(
+            all_reduce_ring_kernel<half, true><<<grid_dim, block_dim, 0, stream>>>(
                     destination,
                     static_cast<half*>(buffer),
                     signal,
@@ -308,25 +275,33 @@ public:
                     gpus_per_node,
                     stage
                     );
-            stage+=2;
         }
+        else 
+        {
+            all_reduce_ring_kernel<half, false><<<grid_dim, block_dim, 0, stream>>>(
+                    destination,
+                    static_cast<half*>(buffer),
+                    signal,
+                    packet_size,
+                    gpus_per_node,
+                    stage
+                    );
+        }
+        stage += 2*(nvshmem_n_pes()-1);
     }
-
-    half* destination;
-    half* buffer;
-    uint32_t gpus_per_node;
-    dim3 grid_size;
-    dim3 block_size;
-    uint64_t *signal;
-    const int packet_size;
     const bool internode;
-    int stage = 1;
-    RingType ring_type;
 };
 
 void* create_all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, RingType ring_type, cudaStream_t stream)
 {
-    return reinterpret_cast<void*>(new AllReduce(buffer, numel, packet_size, block_size, nnodes, routes, ring_type, stream));
+    if (ring_type == RingType::simple)
+    {
+        return reinterpret_cast<void*>(new AllReduceRingSimple(buffer, numel, packet_size, block_size, nnodes, routes, stream));
+    }
+    else 
+    {
+        return reinterpret_cast<void*>(new AllReduceRingStandard(buffer, numel, packet_size, block_size, nnodes, routes, stream));
+    }
 }
 
 void destroy_all_reduce_ring(void* all_reduce_obj)
