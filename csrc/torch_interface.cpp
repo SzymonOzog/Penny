@@ -25,9 +25,9 @@ void init_with_uid(pybind11::bytearray uid_py, int rank, int world_size)
 }
 
 // Ring allreduce object lifecycle API
-void* create_all_reduce_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, RingType ring_type, cudaStream_t stream);
-void destroy_all_reduce_ring(void* all_reduce_obj);
-void all_reduce_ring(void* all_reduce_obj, cudaStream_t stream);
+void* create_all_reduce(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, AlgoType algo_type, cudaStream_t stream);
+void destroy_all_reduce(void* all_reduce_obj);
+void all_reduce(void* all_reduce_obj, cudaStream_t stream);
 void all_reduce_tree(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
 void all_reduce_double_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
 
@@ -36,7 +36,7 @@ void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size,
     if (algo == 0)
     {
         auto stream = at::cuda::getCurrentCUDAStream();
-        void* handle = create_all_reduce_ring(
+        void* handle = create_all_reduce(
             static_cast<half*>(buffer.data_ptr()),
             buffer.numel(),
             packet_size,
@@ -46,8 +46,8 @@ void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size,
             AlgoType::ring_standard,
             stream
         );
-        all_reduce_ring(handle, stream);
-        destroy_all_reduce_ring(handle);
+        all_reduce(handle, stream);
+        destroy_all_reduce(handle);
     }
     else if (algo == 1)
     {
@@ -62,7 +62,7 @@ void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size,
     else if (algo == 2)
     {
         auto stream = at::cuda::getCurrentCUDAStream();
-        void* handle = create_all_reduce_ring(
+        void* handle = create_all_reduce(
             static_cast<half*>(buffer.data_ptr()),
             buffer.numel(),
             packet_size,
@@ -72,8 +72,8 @@ void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size,
             AlgoType::ring_simple,
             stream
         );
-        all_reduce_ring(handle, stream);
-        destroy_all_reduce_ring(handle);
+        all_reduce(handle, stream);
+        destroy_all_reduce(handle);
     }
 }
 
@@ -99,7 +99,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         void* handle;
     if (algo == 0)
     {
-        handle = create_all_reduce_ring(
+        handle = create_all_reduce(
             static_cast<half*>(buffer.data_ptr()),
             buffer.numel(),
             packet_size,
@@ -116,7 +116,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     }
     else if (algo == 2)
     {
-        handle = create_all_reduce_ring(
+        handle = create_all_reduce(
             static_cast<half*>(buffer.data_ptr()),
             buffer.numel(),
             packet_size,
@@ -127,13 +127,26 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
             stream
         );
     }
+    else if (algo == 3)
+    {
+        handle = create_all_reduce(
+            static_cast<half*>(buffer.data_ptr()),
+            buffer.numel(),
+            packet_size,
+            block_size,
+            nnodes,
+            routes,
+            AlgoType::oneshot,
+            stream
+        );
+    }
         return reinterpret_cast<uintptr_t>(handle);
     });
     m.def("all_reduce_run", [](uintptr_t handle) {
         auto stream = at::cuda::getCurrentCUDAStream();
-        all_reduce_ring(reinterpret_cast<void*>(handle), stream);
+        all_reduce(reinterpret_cast<void*>(handle), stream);
     });
     m.def("all_reduce_destroy", [](uintptr_t handle) {
-        destroy_all_reduce_ring(reinterpret_cast<void*>(handle));
+        destroy_all_reduce(reinterpret_cast<void*>(handle));
     });
 }
