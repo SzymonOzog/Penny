@@ -18,6 +18,7 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
     using P = array_t<scalar_t, 16/sizeof(scalar_t)>;
 
     const uint32_t block_size = blockDim.x * packet_size;
+    const uint32_t pe_off = block_size/sizeof(scalar_t);
     const uint64_t off = (blockIdx.x * blockDim.x) * packet_size/sizeof(scalar_t);
 
     const int pe = nvshmem_my_pe();
@@ -27,7 +28,7 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
     {
         if (send_pe == pe)
             continue;
-        nvshmemx_putmem_signal_nbi_block(destination + off + send_pe*block_size,
+        nvshmemx_putmem_signal_nbi_block(destination + off + pe*pe_off,
                 buffer + off,
                 block_size, signal+pe, stage, NVSHMEM_SIGNAL_SET, send_pe);
     }
@@ -41,7 +42,7 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
         for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
             P buf = reinterpret_cast<P*>(buffer + off)[i];
-            P dst = reinterpret_cast<P*>(destination + off + recv_pe*block_size)[i];
+            P dst = reinterpret_cast<P*>(destination + off + recv_pe*pe_off)[i];
             P res;
             for (int j = 0; j < P::size; j++)
                 res.data[j] = float(buf.data[j]) + float(dst.data[j]);
@@ -55,8 +56,8 @@ AllReduceOneShot::AllReduceOneShot(half* _buffer, int numel, int packet_size, in
             nvshmem_n_pes(), stream)
 {
     assert(packet_size*block_size  == numel * sizeof(half));
-    grid_dim.x = std::ceil(numel*sizeof(half) / float(packet_size*block_size*routes));
-    grid_dim.y = routes;
+    grid_dim.x = 1;
+    grid_dim.y = 1;
 }
 void AllReduceOneShot::run(cudaStream_t stream)
 {

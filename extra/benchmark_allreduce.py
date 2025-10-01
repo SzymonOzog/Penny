@@ -48,7 +48,8 @@ def main():
             num = 2 ** pow
             best_time = float("inf")
             best_configuration = None
-            for packet_size in args.packet_sizes:
+            packet_sizes = [-1] if args.algo == 3 else args.packet_sizes
+            for packet_size in packet_sizes:
                 for block_size in args.block_sizes:
                     # for rings in (range(1, 9) if nnodes > 1 else [1]):
                     for rings in ([1] if nnodes > 1 else [1]):
@@ -60,6 +61,8 @@ def main():
                             continue
                         if (num * elem_size) % (packet_size * block_size * rings) != 0 and args.algo == 2:
                             continue
+                        if args.algo == 3:
+                            packet_size = (num*elem_size)//block_size
                         configuration = f"{packet_size=} {block_size=} {num=}, {rings=}"
 
                         data = torch.empty(num, device="cuda", dtype=torch.float16).normal_(mean=0, std=0.1)
