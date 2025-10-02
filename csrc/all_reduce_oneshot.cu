@@ -19,7 +19,6 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
 
     const uint32_t block_size = blockDim.x * packet_size;
     const uint32_t pe_off = block_size/sizeof(scalar_t);
-    const uint64_t off = (blockIdx.x * blockDim.x) * packet_size/sizeof(scalar_t);
 
     const int pe = nvshmem_my_pe();
     const int n_pes = nvshmem_n_pes();
@@ -28,8 +27,8 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
     {
         if (send_pe == pe)
             continue;
-        nvshmemx_putmem_signal_nbi_block(destination + off + pe*pe_off,
-                buffer + off,
+        nvshmemx_putmem_signal_nbi_block(destination + pe*pe_off,
+                buffer,
                 block_size, signal+pe, stage, NVSHMEM_SIGNAL_SET, send_pe);
     }
     for (int recv_pe = 0; recv_pe<n_pes; recv_pe++)
@@ -41,12 +40,12 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
         __syncthreads();
         for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
-            P buf = reinterpret_cast<P*>(buffer + off)[i];
-            P dst = reinterpret_cast<P*>(destination + off + recv_pe*pe_off)[i];
+            P buf = reinterpret_cast<P*>(buffer)[i];
+            P dst = reinterpret_cast<P*>(destination + recv_pe*pe_off)[i];
             P res;
             for (int j = 0; j < P::size; j++)
                 res.data[j] = float(buf.data[j]) + float(dst.data[j]);
-            reinterpret_cast<P*>(buffer + off)[i] = res;
+            reinterpret_cast<P*>(buffer)[i] = res;
         }
     }
 }
