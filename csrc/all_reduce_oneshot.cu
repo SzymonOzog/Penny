@@ -10,6 +10,7 @@
 #include <nvshmemx.h>
 #include "common.h"
 
+__device__ int buffer_lock = 0;
 
 template <typename scalar_t>
 __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, uint64_t* __restrict__ signal,
@@ -23,30 +24,38 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
     const int pe = nvshmem_my_pe();
     const int n_pes = nvshmem_n_pes();
 
-    for (int send_pe = 0; send_pe<n_pes; send_pe++)
+    if (blockIdx.x == pe)
     {
-        if (send_pe == pe)
-            continue;
-        nvshmemx_putmem_signal_nbi_block(destination + pe*pe_off,
-                buffer,
-                block_size, signal+pe, stage, NVSHMEM_SIGNAL_SET, send_pe);
-    }
-    for (int recv_pe = 0; recv_pe<n_pes; recv_pe++)
-    {
-        if (recv_pe == pe)
-            continue;
-        if (threadIdx.x == 0)
-            nvshmem_signal_wait_until(signal+recv_pe, NVSHMEM_CMP_EQ, stage);
-        __syncthreads();
-        for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
+        for (int send_pe = 0; send_pe<n_pes; send_pe++)
         {
-            P buf = reinterpret_cast<P*>(buffer)[i];
-            P dst = reinterpret_cast<P*>(destination + recv_pe*pe_off)[i];
-            P res;
-            for (int j = 0; j < P::size; j++)
-                res.data[j] = float(buf.data[j]) + float(dst.data[j]);
-            reinterpret_cast<P*>(buffer)[i] = res;
+            if (send_pe == pe)
+                continue;
+            nvshmemx_putmem_signal_nbi_block(destination + pe*pe_off,
+                    buffer,
+                    block_size, signal+pe, stage, NVSHMEM_SIGNAL_SET, send_pe);
         }
+        return;
+    }
+    int recv_pe = blockIdx.x;
+    if (threadIdx.x == 0)
+    {
+        nvshmem_signal_wait_until(signal+recv_pe, NVSHMEM_CMP_EQ, stage);
+        while (atomicCAS(&buffer_lock, 0, 1) != 0) {/*wait*/}
+    }
+
+    __syncthreads();
+    for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
+    {
+        P buf = reinterpret_cast<P*>(buffer)[i];
+        P dst = reinterpret_cast<P*>(destination + recv_pe*pe_off)[i];
+        P res;
+        for (int j = 0; j < P::size; j++)
+            res.data[j] = float(buf.data[j]) + float(dst.data[j]);
+        reinterpret_cast<P*>(buffer)[i] = res;
+    }
+    __syncthreads();
+    if (threadIdx.x == 0) {
+        atomicExch(&buffer_lock, 0); // Release lock
     }
 }
 
@@ -55,7 +64,7 @@ AllReduceOneShot::AllReduceOneShot(half* _buffer, int numel, int packet_size, in
             nvshmem_n_pes(), stream)
 {
     assert(packet_size*block_size  == numel * sizeof(half));
-    grid_dim.x = 1;
+    grid_dim.x = nvshmem_n_pes();
     grid_dim.y = 1;
 }
 void AllReduceOneShot::run(cudaStream_t stream)
