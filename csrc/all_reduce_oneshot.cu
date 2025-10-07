@@ -37,6 +37,8 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
     nvshmem_quiet();
     __syncthreads();
     int warp_id = threadIdx.x/32;
+    if(warp_id == 0)
+        return;
     int lane_id = threadIdx.x%32;
     int recv_pe = warp_id;
 
