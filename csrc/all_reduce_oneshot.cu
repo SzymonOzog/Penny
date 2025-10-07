@@ -13,14 +13,13 @@
 
 template <typename scalar_t>
 __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, uint64_t* __restrict__ signal,
-        const int packet_size, const int gpus_per_node, int stage)
+        const int packet_size, const int gpus_per_node, int stage, const int block_size)
 {
     using P = array_t<scalar_t, 16/sizeof(scalar_t)>;
     __shared__ int buffer_lock;
     if (threadIdx.x == 0)
         buffer_lock = 0;
 
-    const uint32_t block_size = blockDim.x * packet_size;
     const uint32_t pe_off = block_size/sizeof(scalar_t);
 
     const int pe = nvshmem_my_pe();
@@ -67,9 +66,9 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
 
 AllReduceOneShot::AllReduceOneShot(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream)
     : AllReduce(_buffer, numel*nvshmem_n_pes(), packet_size, 32*nvshmem_n_pes(), nnodes,
-            nvshmem_n_pes(), stream)
+            nvshmem_n_pes(), stream), block_size(numel*sizeof(half))
 {
-    assert(packet_size*block_size  == numel * sizeof(half));
+    // assert(packet_size*block_size  == numel * sizeof(half));
     grid_dim.x = 1;
     grid_dim.y = 1;
 }
@@ -81,7 +80,8 @@ void AllReduceOneShot::run(cudaStream_t stream)
             signal,
             packet_size,
             gpus_per_node,
-            stage
+            stage,
+            block_size
             );
     stage+=2;
 }

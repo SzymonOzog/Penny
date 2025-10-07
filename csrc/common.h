@@ -77,6 +77,7 @@ class AllReduceOneShot : public AllReduce
 public:
     AllReduceOneShot(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream);
     virtual void run(cudaStream_t stream) override;
+    const int block_size;
 };
 
 inline void* create_all_reduce(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, AlgoType algo_type, cudaStream_t stream)
