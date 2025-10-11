@@ -140,6 +140,19 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
             stream
         );
     }
+    else if (algo == 3)
+    {
+        handle = create_all_reduce(
+            static_cast<half*>(buffer.data_ptr()),
+            buffer.numel(),
+            packet_size,
+            block_size,
+            nnodes,
+            routes,
+            AlgoType::twoshot,
+            stream
+        );
+    }
         return reinterpret_cast<uintptr_t>(handle);
     });
     m.def("all_reduce_run", [](uintptr_t handle) {

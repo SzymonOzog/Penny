@@ -2,7 +2,7 @@
 #include <cuda_fp16.h>
 #include "host/nvshmem_api.h"
 #include "host/nvshmemx_api.h"
-enum class AlgoType { ring_simple, ring_standard, oneshot };
+enum class AlgoType { ring_simple, ring_standard, oneshot, twoshot };
 
 template <typename T> __device__ __forceinline__ void swap_cu(T& a, T& b)
 {
@@ -79,6 +79,13 @@ public:
     virtual void run(cudaStream_t stream) override;
 };
 
+class AllReduceTwoShot : public AllReduce
+{
+public:
+    AllReduceTwoShot(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream);
+    virtual void run(cudaStream_t stream) override;
+};
+
 inline void* create_all_reduce(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, AlgoType algo_type, cudaStream_t stream)
 {
     if (algo_type == AlgoType::ring_simple)
@@ -92,6 +99,10 @@ inline void* create_all_reduce(half* buffer, int numel, int packet_size, int blo
     else if (algo_type == AlgoType::oneshot)
     {
         return reinterpret_cast<void*>(new AllReduceOneShot(buffer, numel, packet_size, block_size, nnodes, routes, stream));
+    }
+    else if (algo_type == AlgoType::twoshot)
+    {
+        return reinterpret_cast<void*>(new AllReduceTwoShot(buffer, numel, packet_size, block_size, nnodes, routes, stream));
     }
     return nullptr;
 }
