@@ -140,7 +140,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
             stream
         );
     }
-    else if (algo == 3)
+    else if (algo == 4)
     {
         handle = create_all_reduce(
             static_cast<half*>(buffer.data_ptr()),
