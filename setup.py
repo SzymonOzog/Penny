@@ -22,6 +22,7 @@ if __name__ == '__main__':
                "csrc/all_reduce_ring_simple.cu",
                "csrc/all_reduce_tree.cu",
                "csrc/all_reduce_oneshot.cu",
+               "csrc/all_reduce_twoshot.cu",
                "csrc/all_reduce_double_ring.cu",
                ]
     include_dirs = ['csrc/', nvshmem_inc]
