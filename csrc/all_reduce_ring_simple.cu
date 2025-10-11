@@ -80,7 +80,7 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
 }
 
 AllReduceRingSimple::AllReduceRingSimple(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream)
-    : AllReduce(_buffer, numel, packet_size, block_size, nnodes,
+    : AllReduce(_buffer, numel, numel, packet_size, block_size, nnodes,
             std::ceil(numel*sizeof(half) / float(packet_size*block_size*routes)) * routes, stream)
 {
     grid_dim.x = std::ceil(numel*sizeof(half) / float(packet_size*block_size*routes));

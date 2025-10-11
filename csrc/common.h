@@ -21,12 +21,12 @@ struct __align__(alignof(T) * sz) array_t {
 class AllReduce
 {
 public:
-    AllReduce(half* _buffer, int sym_mem_size, int packet_size, int block_size, int nnodes, int signals, cudaStream_t stream) :
+    AllReduce(half* _buffer, int buffer_size, int sym_mem_size, int packet_size, int block_size, int nnodes, int signals, cudaStream_t stream) :
         packet_size(packet_size)
     {
         destination = (half *) nvshmem_malloc(sym_mem_size * sizeof(half));
 
-        nvshmemx_buffer_register(_buffer, sym_mem_size * sizeof(half));
+        nvshmemx_buffer_register(_buffer, buffer_size * sizeof(half));
         buffer = _buffer;
         
         gpus_per_node = nvshmem_n_pes()/nnodes;
