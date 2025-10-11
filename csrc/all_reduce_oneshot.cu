@@ -10,7 +10,7 @@
 #include <nvshmemx.h>
 #include "common.h"
 
-__device__ int buffer_lock = 0;
+__device__ int buffer_lock[4] = {0};
 
 template <typename scalar_t>
 __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, uint64_t* __restrict__ signal,
@@ -24,43 +24,86 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
     const int pe = nvshmem_my_pe();
     const int n_pes = nvshmem_n_pes();
 
-    if (blockIdx.x == pe)
+    auto reduce = [&](scalar_t* s1_p, scalar_t* s2_p, scalar_t* dst)
     {
-        for (int send_pe = 0; send_pe<n_pes; send_pe++)
+        for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
-            if (send_pe == pe)
-                continue;
+            P src1 = reinterpret_cast<P*>(s1_p)[i];
+            P src2 = reinterpret_cast<P*>(s2_p)[i];
+            P res;
+            for (int j = 0; j < P::size; j++)
+                res.data[j] = float(src1.data[j]) + float(src2.data[j]);
+            reinterpret_cast<P*>(dst)[i] = res;
+        }
+    };
+
+    if (blockIdx.x != pe)
+    {
             nvshmemx_putmem_signal_nbi_block(destination + pe*pe_off,
                     buffer,
-                    block_size, signal+pe, stage, NVSHMEM_SIGNAL_SET, send_pe);
-        }
+                    block_size, signal+pe, stage, NVSHMEM_SIGNAL_SET, blockIdx.x);
+    }
+    int off = 4;
+    if (blockIdx.x >= off)
+    {
         return;
     }
-    int recv_pe = blockIdx.x;
-    if (threadIdx.x == 0)
+
+    int recv_pe0 = blockIdx.x;
+    int recv_pe1 = blockIdx.x + off;
+
+    if (threadIdx.x == 0 && recv_pe0 != pe)
     {
-        nvshmem_signal_wait_until(signal+recv_pe, NVSHMEM_CMP_EQ, stage);
-        while (atomicCAS(&buffer_lock, 0, 1) != 0) {/*wait*/}
+        nvshmem_signal_wait_until(signal+recv_pe0, NVSHMEM_CMP_EQ, stage);
+    }
+    if (threadIdx.x == 1 && recv_pe1 != pe)
+    {
+        nvshmem_signal_wait_until(signal+recv_pe1, NVSHMEM_CMP_EQ, stage);
     }
 
     __syncthreads();
-    for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
+    reduce(recv_pe0 == pe ? buffer : destination + recv_pe0*pe_off,
+            recv_pe1 == pe ? buffer : destination + recv_pe1*pe_off,
+            destination + recv_pe0*pe_off);
+    __syncthreads();
+
+    off /= 2;
+    if (blockIdx.x >= off)
     {
-        P buf = reinterpret_cast<P*>(buffer)[i];
-        P dst = reinterpret_cast<P*>(destination + recv_pe*pe_off)[i];
-        P res;
-        for (int j = 0; j < P::size; j++)
-            res.data[j] = float(buf.data[j]) + float(dst.data[j]);
-        reinterpret_cast<P*>(buffer)[i] = res;
+        if (threadIdx.x == 0) { atomicAdd(&buffer_lock[blockIdx.x], 1); }
+        return;
+    }
+    if(threadIdx.x == 0)
+    {
+        while(atomicCAS(&buffer_lock[blockIdx.x+off], 1, 0) != 1) { }
     }
     __syncthreads();
-    if (threadIdx.x == 0) {
-        atomicExch(&buffer_lock, 0); // Release lock
+    recv_pe1 = blockIdx.x + off;
+    reduce(destination + recv_pe0*pe_off,
+            destination + recv_pe1*pe_off,
+            destination + recv_pe0*pe_off);
+    __syncthreads();
+
+    off /= 2;
+    if (blockIdx.x >= off)
+    {
+        if (threadIdx.x == 0) { atomicAdd(&buffer_lock[blockIdx.x], 1); }
+        return;
     }
+    if(threadIdx.x == 0)
+    {
+        while(atomicCAS(&buffer_lock[blockIdx.x+off], 1, 0) != 1) {}
+        nvshmem_quiet();
+    }
+    __syncthreads();
+    recv_pe1 = blockIdx.x + off;
+    reduce(destination + recv_pe0*pe_off,
+            destination + recv_pe1*pe_off,
+            buffer);
 }
 
 AllReduceOneShot::AllReduceOneShot(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream)
-    : AllReduce(_buffer, numel*nvshmem_n_pes(), packet_size, block_size, nnodes,
+    : AllReduce(_buffer, numel, numel*nvshmem_n_pes(), packet_size, block_size, nnodes,
             nvshmem_n_pes(), stream)
 {
     assert(packet_size*block_size  == numel * sizeof(half));
