@@ -42,31 +42,38 @@ def main():
     local_rank = rank % local_size
     # float16
     elem_size = 2
+    penny_bandwidth = []
+    penny_times = []
 
     def run_benchmark():
         for pow in range(args.start_pow, args.start_pow + args.range):
             num = 2 ** pow
             best_time = float("inf")
             best_configuration = None
-            packet_sizes = [-1] if args.algo == 3 else args.packet_sizes
+            packet_sizes = [-1] if args.algo in [3, 4] else args.packet_sizes
             for packet_size in packet_sizes:
                 for block_size in args.block_sizes:
                     # for rings in (range(1, 9) if nnodes > 1 else [1]):
                     for rings in ([1] if nnodes > 1 else [1]):
                         if pow > 23 and packet_size < 32:
                             continue
-                        if (num * elem_size) % (packet_size * block_size * world_size * rings) != 0 and args.algo == 0:
+                        if args.algo == 0 and (num * elem_size) % (packet_size * block_size * world_size * rings) != 0:
                             continue
-                        if (num * elem_size) % (packet_size * block_size * local_size) != 0 and args.algo == 1:
+                        if args.algo == 1 and (num * elem_size) % (packet_size * block_size * local_size) != 0:
                             continue
-                        if (num * elem_size) % (packet_size * block_size * rings) != 0 and args.algo == 2:
+                        if args.algo == 2 and (num * elem_size) % (packet_size * block_size * rings) != 0:
                             continue
                         if args.algo == 3:
                             packet_size = (num*elem_size)//block_size
+                        if args.algo == 4:
+                            packet_size = (num*elem_size)//(block_size*world_size)
+                            if packet_size < 1:
+                                continue
                         configuration = f"{packet_size=} {block_size=} {num=}, {rings=}"
 
                         data = torch.empty(num, device="cuda", dtype=torch.float16).normal_(mean=0, std=0.1)
-                        # data = torch.ones(num, device="cuda", dtype=torch.float16)
+                        # mul = [(i*world_size)//num for i in range(num)]
+                        # data = torch.ones(num, device="cuda", dtype=torch.float16) * torch.tensor(mul).to(data.device)
                         data2 = data.clone()
                         recv_bytes = 2 * data2.nelement() * data2.element_size()
                         handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, rings, args.algo)
@@ -79,12 +86,14 @@ def main():
                                 dist.all_reduce(data)
                                 penny_cpp.all_reduce_run(handle)
 
-                            if not torch.allclose(data, data2, atol=args.atol, rtol=args.rtol) and rank == 0:
+                            if not torch.allclose(data, data2, atol=args.atol, rtol=args.rtol):
                                 idx = torch.isclose(data, data2, atol=args.atol, rtol=args.rtol)
                                 num_missed = idx.logical_not().sum() / idx.nelement()
                                 print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {data2.mean()}")
-                                print(data[idx.logical_not()])
-                                print(data2[idx.logical_not()])
+                                print(data[idx.logical_not()][:10])
+                                print(data2[idx.logical_not()][:10])
+                                print(data[:10])
+                                print(data2[:10])
 
                         if args.profile_mode == "info" or args.profile_mode == "verbose":
                             penny_time = bench_kineto(lambda: penny_cpp.all_reduce_run(handle),
@@ -109,6 +118,11 @@ def main():
                       f"bandwidth {recv_bytes / 1e3 / nccl_time :.2f} GB/s  "
                       f"penny_time time: {best_time:.2f}us, "
                       f"bandwidth {recv_bytes / 1e3 / best_time :.2f} GB/s")
+                penny_times.append(best_time)
+                penny_bandwidth.append(recv_bytes / 1e3 / best_time)
+        if(rank == 0):
+            print(penny_bandwidth)
+            print(penny_times)
 
     if args.profile_mode == "file" and rank == 0:
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
