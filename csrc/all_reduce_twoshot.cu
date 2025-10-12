@@ -47,35 +47,20 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
     if( blockIdx.x == pe)
         write_chunk = 0;
 
-    bool p = pe == 2 && blockIdx.x == 0 && threadIdx.x == 0;
-
-    auto wait_and_write = [&]()
+    auto wait_send_write = [&]()
     {
-        // if(blockIdx.x == 1 && threadIdx.x == 0)
-        //     printf("%d waiting stage 0 %d\n", pe, write_chunk);
-        // if(pe == 1 && blockIdx.x == 1 && threadIdx.x == 0)
-        //     printf("%d, waiting stage 1 %d, %d, %d off %d, pe_off %d\n", pe, write_chunk, int(destination[n_pes*pe_off + write_chunk*pe_off]), int(buffer[pe*pe_off]), (n_pes+pe), pe_off);
         if (threadIdx.x == 0)
         {
             nvshmem_signal_wait_until(signal+n_pes+pe, NVSHMEM_CMP_EQ, stage);
         }
         __syncthreads();
         __threadfence();
-        // if(int(buffer[pe*pe_off]) != pe*n_pes && threadIdx.x == 0 && pe == 2)
-        //     printf(" wrong val at %d, %d, %d\n", pe, blockIdx.x, int(buffer[pe*pe_off]));
-            // write_chunk = -1;
-        // if(blockIdx.x == 1 && threadIdx.x == 0)
-        //     printf("%d waiting stage 1 %d \n", pe, write_chunk);
-        // if(pe == 1 && write_chunk == 0 && threadIdx.x == 0)
-        //     printf("%d, waiting stage 1 %d, %d, %d off %d, pe_off %d\n", pe, write_chunk, int(destination[n_pes*pe_off + write_chunk*pe_off]), int(buffer[pe*pe_off]), (n_pes+pe), pe_off);
         nvshmemx_putmem_signal_nbi_block(destination + (n_pes+pe)*pe_off,
                 buffer + pe*pe_off,
                 block_size, signal+n_pes+pe, stage, NVSHMEM_SIGNAL_SET, write_chunk);
         if (threadIdx.x == 0)
             nvshmem_signal_wait_until(signal+n_pes+write_chunk, NVSHMEM_CMP_EQ, stage);
         __syncthreads();
-        // if(pe == 0 && write_chunk == 1 && threadIdx.x == 0)
-        //     printf("%d, waiting stage 2 %d, %d, %d, off %d\n", pe, write_chunk, int(destination[n_pes*pe_off + write_chunk*pe_off]), int(buffer[pe*pe_off]), (n_pes+write_chunk));
         for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
             reinterpret_cast<P*>(buffer + write_chunk*pe_off)[i] =
@@ -92,14 +77,12 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
     int off = 4;
     if (blockIdx.x >= off)
     {
-        wait_and_write();
+        wait_send_write();
         return;
     }
 
     int recv_pe0 = blockIdx.x;
     int recv_pe1 = blockIdx.x + off;
-    // if(p)
-    //     printf("running stage 0\n");
 
     if (threadIdx.x == 0 && recv_pe0 != pe)
     {
@@ -109,8 +92,6 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
     {
         nvshmem_signal_wait_until(signal+recv_pe1, NVSHMEM_CMP_EQ, stage);
     }
-    // if(p)
-    //     printf("running stage 1\n");
 
     __syncthreads();
     reduce(recv_pe0 == pe ? buffer + pe*pe_off : destination + recv_pe0*pe_off,
@@ -122,15 +103,14 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
     if (blockIdx.x >= off)
     {
         if (threadIdx.x == 0) { atomicAdd(&buffer_lock_[blockIdx.x], 1); }
-        wait_and_write();
+        wait_send_write();
         return;
     }
     if(threadIdx.x == 0)
     {
         while(atomicCAS(&buffer_lock_[blockIdx.x+off], 1, 0) != 1) { }
     }
-    // if(p)
-    //     printf("running stage 2\n");
+
     __syncthreads();
     recv_pe1 = blockIdx.x + off;
     reduce(destination + recv_pe0*pe_off,
@@ -142,13 +122,13 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
     if (blockIdx.x >= off)
     {
         if (threadIdx.x == 0) { atomicAdd(&buffer_lock_[blockIdx.x], 1); }
-        wait_and_write();
+        wait_send_write();
         return;
     }
     if(threadIdx.x == 0)
     {
         while(atomicCAS(&buffer_lock_[blockIdx.x+off], 1, 0) != 1) {}
-        nvshmem_quiet();
+        nvshmem_fence();
     }
     __syncthreads();
     recv_pe1 = blockIdx.x + off;
@@ -156,10 +136,8 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
             destination + recv_pe1*pe_off,
             buffer + write_chunk*pe_off);
     __syncthreads();
-    __threadfence();
     if (threadIdx.x == 0)
     {
-        // atomicExch(signal+n_pes+write_chunk, uint64_t(stage));
         nvshmemx_signal_op(signal+n_pes+write_chunk, stage, NVSHMEM_SIGNAL_SET, pe);
     }
 }
