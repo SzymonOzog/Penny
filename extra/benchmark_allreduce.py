@@ -51,32 +51,34 @@ def main():
             best_time = float("inf")
             best_configuration = None
             packet_sizes = [-1] if args.algo in [3, 4] else args.packet_sizes
+            n_routes = [1, 2, 4, 8, 16, 32] if args.algo == 4 else [1]
             for packet_size in packet_sizes:
                 for block_size in args.block_sizes:
-                    # for rings in (range(1, 9) if nnodes > 1 else [1]):
-                    for rings in ([1] if nnodes > 1 else [1]):
+                    for routes in n_routes:
                         if pow > 23 and packet_size < 32:
                             continue
-                        if args.algo == 0 and (num * elem_size) % (packet_size * block_size * world_size * rings) != 0:
+                        if args.algo == 0 and (num * elem_size) % (packet_size * block_size * world_size * routes) != 0:
                             continue
                         if args.algo == 1 and (num * elem_size) % (packet_size * block_size * local_size) != 0:
                             continue
-                        if args.algo == 2 and (num * elem_size) % (packet_size * block_size * rings) != 0:
+                        if args.algo == 2 and (num * elem_size) % (packet_size * block_size * routes) != 0:
                             continue
                         if args.algo == 3:
                             packet_size = (num*elem_size)//block_size
                         if args.algo == 4:
                             packet_size = (num*elem_size)//(block_size*world_size)
-                            if packet_size < 1:
+                            reduce_size = (packet_size*block_size)//(world_size*routes)
+                            if packet_size < 1 or reduce_size == 0 or reduce_size%16 != 0 or (routes == 32 and block_size == 1024):
                                 continue
-                        configuration = f"{packet_size=} {block_size=} {num=}, {rings=}"
+
+                        configuration = f"{packet_size=} {block_size=} {num=}, {routes=}"
 
                         data = torch.empty(num, device="cuda", dtype=torch.float16).normal_(mean=0, std=0.1)
-                        # mul = [(i*world_size)//num for i in range(num)]
-                        # data = torch.ones(num, device="cuda", dtype=torch.float16) * torch.tensor(mul).to(data.device)
+                        mul = [(i*world_size + num)//num for i in range(num)]
+                        data = torch.ones(num, device="cuda", dtype=torch.float16) * torch.tensor(mul).to(data.device)
                         data2 = data.clone()
                         recv_bytes = 2 * data2.nelement() * data2.element_size()
-                        handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, rings, args.algo)
+                        handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, routes, args.algo)
 
                         for _ in range(args.num_tests):
                             #avoid stacking errors
