@@ -13,7 +13,7 @@
 #include "common.h"
 
 
-__device__ int buffer_lock_[4] = {0};
+__device__ int buffer_lock_[2] = {0};
 
 template <typename scalar_t>
 __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, scalar_t*  buffer, uint64_t* signal,
@@ -62,10 +62,12 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
                     buffer + write_chunk*pe_off,
                     block_size, signal+pe, stage, NVSHMEM_SIGNAL_SET, write_chunk);
     }
-    int off = 4;
+    int off = 2;
 
     int recv_pe0 = blockIdx.x%off;
     int recv_pe1 = recv_pe0 + off;
+    int recv_pe2 = recv_pe1 + off;
+    int recv_pe3 = recv_pe2 + off;
 
     if (threadIdx.x == 0 && recv_pe0 != pe)
     {
@@ -75,6 +77,14 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
     {
         nvshmem_signal_wait_until(signal+recv_pe1, NVSHMEM_CMP_EQ, stage);
     }
+    if (threadIdx.x == 2 && recv_pe2 != pe)
+    {
+        nvshmem_signal_wait_until(signal+recv_pe2, NVSHMEM_CMP_EQ, stage);
+    }
+    if (threadIdx.x == 3 && recv_pe3 != pe)
+    {
+        nvshmem_signal_wait_until(signal+recv_pe3, NVSHMEM_CMP_EQ, stage);
+    }
 
     __syncthreads();
     const int blocks = gridDim.y * gridDim.x/off;
@@ -83,7 +93,9 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
         const uint32_t reduce_off = (blockIdx.y * blocks/gridDim.y + blockIdx.x/off) * reduce_size/sizeof(scalar_t);
 
         scalar_t* s1_p = recv_pe0 == pe ? buffer + pe*pe_off : destination + recv_pe0*pe_off;
-        scalar_t* s2_p =  recv_pe1 == pe ? buffer + pe*pe_off : destination + recv_pe1*pe_off;
+        scalar_t* s2_p = recv_pe1 == pe ? buffer + pe*pe_off : destination + recv_pe1*pe_off;
+        scalar_t* s3_p = recv_pe2 == pe ? buffer + pe*pe_off : destination + recv_pe2*pe_off;
+        scalar_t* s4_p = recv_pe3 == pe ? buffer + pe*pe_off : destination + recv_pe3*pe_off;
         scalar_t* dst = destination + recv_pe0*pe_off;
 
         // if(pe == 0 && blockIdx.x%4 == 1 && threadIdx.x == 0)
@@ -94,9 +106,11 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
         {
             P src1 = reinterpret_cast<P*>(s1_p + reduce_off)[i];
             P src2 = reinterpret_cast<P*>(s2_p + reduce_off)[i];
+            P src3 = reinterpret_cast<P*>(s3_p + reduce_off)[i];
+            P src4 = reinterpret_cast<P*>(s4_p + reduce_off)[i];
             P res;
             for (int j = 0; j < P::size; j++)
-                res.data[j] = float(src1.data[j]) + float(src2.data[j]);
+                res.data[j] = float(src1.data[j]) + float(src2.data[j]) + float(src3.data[j]) + float(src4.data[j]);
             reinterpret_cast<P*>(dst + reduce_off)[i] = res;
         }
     }
@@ -104,7 +118,7 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
 
     if (threadIdx.x == 0) { atomicAdd(&buffer_lock_[blockIdx.x%off], 1); }
 
-    if(threadIdx.x < 4)
+    if(threadIdx.x < 2)
     {
         while(atomicAdd(&buffer_lock_[threadIdx.x], 0) != blocks) { }
         nvshmem_fence();
@@ -116,7 +130,7 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
     for (int i = threadIdx.x; i < reduce_size/(sizeof(P)); i += blockDim.x)
     {
         P res = reinterpret_cast<P*>(destination + recv_pe0*pe_off + reduce_off)[i];
-        for (int recv_pe = 1; recv_pe < 4; recv_pe++)
+        for (int recv_pe = 1; recv_pe < 2; recv_pe++)
         {
             P src = reinterpret_cast<P*>(destination + recv_pe*pe_off + reduce_off)[i];
             for (int j = 0; j < P::size; j++)
@@ -141,7 +155,7 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
     __threadfence_system();
     if (write_chunk == pe)
     {
-        reinterpret_cast<int4*>(buffer_lock_)[0] = make_int4(0,0,0,0);
+        reinterpret_cast<int2*>(buffer_lock_)[0] = make_int2(0,0);
         return;
     }
 
