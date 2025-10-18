@@ -73,6 +73,7 @@ def main():
                             packet_size = (num*elem_size)//block_size
                         if args.algo == 4:
                             packet_size = (num*elem_size)//(block_size*world_size)
+                        if args.algo in [3, 4]:
                             reduce_size = (packet_size*block_size)//(world_size*routes)
                             if packet_size < 1 or reduce_size == 0 or reduce_size%16 != 0 or (routes == 32 and block_size == 1024):
                                 continue

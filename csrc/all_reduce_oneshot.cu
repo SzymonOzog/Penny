@@ -12,7 +12,7 @@
 
 __device__ int buffer_lock[4] = {0};
 
-template <typename scalar_t>
+template <typename scalar_t, int N_PES = 8>
 __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, uint64_t* __restrict__ signal,
         const int packet_size, const int gpus_per_node, int stage)
 {
@@ -37,69 +37,40 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
         }
     };
 
-    if (blockIdx.x != pe)
+    if (blockIdx.x != pe && blockIdx.y == 0)
     {
             nvshmemx_putmem_signal_nbi_block(destination + pe*pe_off,
                     buffer,
                     block_size, signal+pe, stage, NVSHMEM_SIGNAL_SET, blockIdx.x);
     }
-    int off = 4;
-    if (blockIdx.x >= off)
-    {
-        return;
-    }
 
-    int recv_pe0 = blockIdx.x;
-    int recv_pe1 = blockIdx.x + off;
-
-    if (threadIdx.x == 0 && recv_pe0 != pe)
+    for(int tid = 0; tid<N_PES; tid++)
     {
-        nvshmem_signal_wait_until(signal+recv_pe0, NVSHMEM_CMP_EQ, stage);
-    }
-    if (threadIdx.x == 1 && recv_pe1 != pe)
-    {
-        nvshmem_signal_wait_until(signal+recv_pe1, NVSHMEM_CMP_EQ, stage);
+        if (threadIdx.x == tid && tid != pe)
+        {
+            nvshmem_signal_wait_until(signal+tid, NVSHMEM_CMP_EQ, stage);
+        }
     }
 
     __syncthreads();
-    reduce(recv_pe0 == pe ? buffer : destination + recv_pe0*pe_off,
-            recv_pe1 == pe ? buffer : destination + recv_pe1*pe_off,
-            destination + recv_pe0*pe_off);
-    __syncthreads();
+    const uint32_t reduce_size = block_size/(N_PES*gridDim.y);
+    const uint32_t reduce_off = (blockIdx.y*gridDim.x + blockIdx.x)*reduce_size/sizeof(scalar_t);
 
-    off /= 2;
-    if (blockIdx.x >= off)
+    for (int i = threadIdx.x; i < reduce_size/(sizeof(P)); i += blockDim.x)
     {
-        if (threadIdx.x == 0) { atomicAdd(&buffer_lock[blockIdx.x], 1); }
-        return;
+        P res = reinterpret_cast<P*>(buffer + reduce_off)[i];
+        for (int recv_pe = 0; recv_pe < N_PES; recv_pe++)
+        {
+            if(recv_pe == pe)
+                continue;
+            P src = reinterpret_cast<P*>(destination + recv_pe*pe_off + reduce_off)[i];
+            for (int j = 0; j < P::size; j++)
+            {
+                res.data[j] += float(src.data[j]);
+            }
+        }
+        reinterpret_cast<P*>(buffer +  reduce_off)[i] = res;
     }
-    if(threadIdx.x == 0)
-    {
-        while(atomicCAS(&buffer_lock[blockIdx.x+off], 1, 0) != 1) { }
-    }
-    __syncthreads();
-    recv_pe1 = blockIdx.x + off;
-    reduce(destination + recv_pe0*pe_off,
-            destination + recv_pe1*pe_off,
-            destination + recv_pe0*pe_off);
-    __syncthreads();
-
-    off /= 2;
-    if (blockIdx.x >= off)
-    {
-        if (threadIdx.x == 0) { atomicAdd(&buffer_lock[blockIdx.x], 1); }
-        return;
-    }
-    if(threadIdx.x == 0)
-    {
-        while(atomicCAS(&buffer_lock[blockIdx.x+off], 1, 0) != 1) {}
-        nvshmem_quiet();
-    }
-    __syncthreads();
-    recv_pe1 = blockIdx.x + off;
-    reduce(destination + recv_pe0*pe_off,
-            destination + recv_pe1*pe_off,
-            buffer);
 }
 
 AllReduceOneShot::AllReduceOneShot(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream)
@@ -108,7 +79,7 @@ AllReduceOneShot::AllReduceOneShot(half* _buffer, int numel, int packet_size, in
 {
     assert(packet_size*block_size  == numel * sizeof(half));
     grid_dim.x = nvshmem_n_pes();
-    grid_dim.y = 1;
+    grid_dim.y = routes;
 }
 void AllReduceOneShot::run(cudaStream_t stream)
 {
