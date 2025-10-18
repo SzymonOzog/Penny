@@ -40,6 +40,12 @@ def main():
     nnodes = int(os.getenv("NNODES", "1"))
     local_size = world_size // nnodes
     local_rank = rank % local_size
+    if nnodes == 1:
+        from vllm.distributed.device_communicators.custom_all_reduce import CustomAllreduce
+        group = dist.new_group(list(range(world_size)), backend="gloo") 
+        custom_ar = CustomAllreduce(group, device=local_rank, max_size = 2**(args.start_pow + args.range))
+    else:
+        custom_ar = None
     # float16
     elem_size = 2
     penny_bandwidth = []
@@ -77,16 +83,21 @@ def main():
                         mul = [(i*world_size + num)//num for i in range(num)]
                         data = torch.ones(num, device="cuda", dtype=torch.float16) * torch.tensor(mul).to(data.device)
                         data2 = data.clone()
+                        data3 = data.clone()
                         recv_bytes = 2 * data2.nelement() * data2.element_size()
                         handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, routes, args.algo)
 
                         for _ in range(args.num_tests):
                             #avoid stacking errors
                             data2.copy_(data)
+                            data3.copy_(data)
 
                             with record_function(configuration):
                                 dist.all_reduce(data)
                                 penny_cpp.all_reduce_run(handle)
+                                if custom_ar is not None:
+                                    data3 = custom_ar.all_reduce(data3)
+
 
                             if not torch.allclose(data, data2, atol=args.atol, rtol=args.rtol):
                                 idx = torch.isclose(data, data2, atol=args.atol, rtol=args.rtol)
@@ -95,12 +106,26 @@ def main():
                                 print(data[idx.logical_not()][:10])
                                 print(data2[idx.logical_not()][:10])
                                 print(data[:10])
-                                print(data2[:10])
+
+                            if not torch.allclose(data, data3, atol=args.atol, rtol=args.rtol) and rank == 0:
+                                idx = torch.isclose(data, data3, atol=args.atol, rtol=args.rtol)
+                                num_missed = idx.logical_not().sum() / idx.nelement()
+                                print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {data3.mean()}")
+                                print(data[idx.logical_not()][:10])
+                                print(data3[idx.logical_not()][:10])
+                                print(data[:10])
+                                print(data3[:10])
+                                print(data3[:10])
 
                         if args.profile_mode == "info" or args.profile_mode == "verbose":
                             penny_time = bench_kineto(lambda: penny_cpp.all_reduce_run(handle),
                                                       kernel_name="all_reduce")
                             nccl_time = bench_kineto(lambda: dist.all_reduce(data), kernel_name="AllReduce_Sum_f16")
+                            if custom_ar is not None:
+                                custom_time = bench_kineto(lambda: custom_ar.all_reduce(data3),
+                                                          kernel_name="reduce")
+                            else:
+                                custom_time = 1
 
                             if penny_time < best_time:
                                 best_time = penny_time
@@ -110,7 +135,10 @@ def main():
                                 print(f"{configuration=} nccl time: {nccl_time:.2f}us, "
                                       f"bandwidth {recv_bytes / 1e3 / nccl_time :.2f} GB/s  "
                                       f"penny_time: {penny_time:.2f}us, "
-                                      f"bandwidth {recv_bytes / 1e3 / penny_time :.2f} GB/s")
+                                      f"bandwidth {recv_bytes / 1e3 / penny_time :.2f} GB/s "
+                                      f"custom_time: {custom_time:.2f}us, "
+                                      f"bandwidth {recv_bytes / 1e3 / custom_time :.2f} GB/s"
+                                      )
                         penny_cpp.all_reduce_destroy(handle)
 
             if rank == 0 and args.profile_mode == "info" and best_configuration is None:
@@ -119,7 +147,10 @@ def main():
                 print(f"{best_configuration=} nccl time: {nccl_time:.2f}us, "
                       f"bandwidth {recv_bytes / 1e3 / nccl_time :.2f} GB/s  "
                       f"penny_time time: {best_time:.2f}us, "
-                      f"bandwidth {recv_bytes / 1e3 / best_time :.2f} GB/s")
+                      f"bandwidth {recv_bytes / 1e3 / best_time :.2f} GB/s "
+                      f"custom_time: {custom_time:.2f}us, "
+                      f"bandwidth {recv_bytes / 1e3 / custom_time :.2f} GB/s"
+                      )
                 penny_times.append(best_time)
                 penny_bandwidth.append(recv_bytes / 1e3 / best_time)
         if(rank == 0):
