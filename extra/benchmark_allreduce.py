@@ -65,15 +65,13 @@ def main():
                             continue
                         if args.algo == 0 and (num * elem_size) % (packet_size * block_size * world_size * routes) != 0:
                             continue
-                        if args.algo == 1 and (num * elem_size) % (packet_size * block_size * local_size) != 0:
+                        if args.algo == 1 and (num * elem_size) % (packet_size * block_size * routes) != 0:
                             continue
-                        if args.algo == 2 and (num * elem_size) % (packet_size * block_size * routes) != 0:
-                            continue
-                        if args.algo == 3:
+                        if args.algo == 2:
                             packet_size = (num*elem_size)//block_size
-                        if args.algo == 4:
+                        if args.algo == 3:
                             packet_size = (num*elem_size)//(block_size*world_size)
-                        if args.algo in [3, 4]:
+                        if args.algo in [2, 3]:
                             reduce_size = (packet_size*block_size)//(world_size*routes)
                             if packet_size < 1 or reduce_size == 0 or reduce_size%16 != 0 or (routes == 32 and block_size == 1024):
                                 continue
