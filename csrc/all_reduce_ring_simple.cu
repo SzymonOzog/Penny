@@ -12,7 +12,7 @@
 
 
 template <typename scalar_t>
-__global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, uint64_t* __restrict__ signal,
+__global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, scalar_t* __restrict__ output, uint64_t* __restrict__ signal,
         const int packet_size, const int gpus_per_node, int stage)
 {
     using P = array_t<scalar_t, 16/sizeof(scalar_t)>;
@@ -51,10 +51,10 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
             P res;
             for (int j = 0; j < P::size; j++)
                 res.data[j] = float(buf.data[j]) + float(dst.data[j]);
-            reinterpret_cast<P*>(buffer + off)[i] = res;
+            reinterpret_cast<P*>(output + off)[i] = res;
         }
         nvshmemx_putmem_signal_nbi_block(destination + off,
-                buffer + off,
+                output + off,
                 block_size, local_signal, send_stage, NVSHMEM_SIGNAL_SET, send_peer);
         send_stage++;
     }
@@ -73,7 +73,7 @@ __global__ void all_reduce_simple_ring_kernel(scalar_t* __restrict__ destination
 
         for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
-            reinterpret_cast<P*>(buffer + off)[i] =
+            reinterpret_cast<P*>(output + off)[i] =
                 reinterpret_cast<P*>(destination + off)[i];
         }
     }
@@ -86,11 +86,12 @@ AllReduceRingSimple::AllReduceRingSimple(half* _buffer, int numel, int packet_si
     grid_dim.x = std::ceil(numel*sizeof(half) / float(packet_size*block_size*routes));
     grid_dim.y = routes;
 }
-void AllReduceRingSimple::run(cudaStream_t stream)
+void AllReduceRingSimple::run(half* output, cudaStream_t stream)
 {
     all_reduce_simple_ring_kernel<half><<<grid_dim, block_dim, 0, stream>>>(
             destination,
             static_cast<half*>(buffer),
+            output,
             signal,
             packet_size,
             gpus_per_node,

@@ -27,11 +27,11 @@ void init_with_uid(pybind11::bytearray uid_py, int rank, int world_size)
 // Ring allreduce object lifecycle API
 void* create_all_reduce(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, AlgoType algo_type, cudaStream_t stream);
 void destroy_all_reduce(void* all_reduce_obj);
-void all_reduce(void* all_reduce_obj, cudaStream_t stream);
+void all_reduce(void* all_reduce_obj, half* output, cudaStream_t stream);
 void all_reduce_tree(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
 void all_reduce_double_ring(half* buffer, int numel, int packet_size, int block_size, int nnodes, cudaStream_t stream);
 
-void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size, int nnodes, int algo, int routes)
+void all_reduce_launcher(torch::Tensor& buffer, torch::Tensor& output, int packet_size, int block_size, int nnodes, int algo, int routes)
 {
     if (algo == 0)
     {
@@ -46,7 +46,7 @@ void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size,
             AlgoType::ring_standard,
             stream
         );
-        all_reduce(handle, stream);
+        all_reduce(handle, static_cast<half*>(output.data_ptr()), stream);
         destroy_all_reduce(handle);
     }
     else if (algo == 1)
@@ -72,7 +72,7 @@ void all_reduce_launcher(torch::Tensor& buffer, int packet_size, int block_size,
             AlgoType::ring_simple,
             stream
         );
-        all_reduce(handle, stream);
+        all_reduce(handle, static_cast<half*>(output.data_ptr()), stream);
         destroy_all_reduce(handle);
     }
 }
@@ -155,9 +155,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     }
         return reinterpret_cast<uintptr_t>(handle);
     });
-    m.def("all_reduce_run", [](uintptr_t handle) {
+    m.def("all_reduce_run", [](uintptr_t handle, torch::Tensor& output) {
         auto stream = at::cuda::getCurrentCUDAStream();
-        all_reduce(reinterpret_cast<void*>(handle), stream);
+        all_reduce(reinterpret_cast<void*>(handle), static_cast<half*>(output.data_ptr()), stream);
     });
     m.def("all_reduce_destroy", [](uintptr_t handle) {
         destroy_all_reduce(reinterpret_cast<void*>(handle));

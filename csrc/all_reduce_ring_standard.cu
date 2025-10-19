@@ -11,7 +11,7 @@
 #include "common.h"
 
 template <typename scalar_t, bool INTERNODE>
-__global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, uint64_t* __restrict__ signal,
+__global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, scalar_t* __restrict__ output, uint64_t* __restrict__ signal,
         const int packet_size, const int gpus_per_node, int stage)
 {
     using P = array_t<scalar_t, 16/sizeof(scalar_t)>;
@@ -97,8 +97,9 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
     uint64_t* local_signal = signal + blockIdx.x + blockIdx.y * gridDim.x;
     for (int chunk = 0; chunk < n_pes - 1; chunk++)
     {
+        half* src = chunk == 0 ? buffer : output;
         nvshmemx_putmem_signal_nbi_block(destination + off + send_chunk*chunk_off,
-                buffer + send_chunk*chunk_off + off,
+                src + send_chunk*chunk_off + off,
                 block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
 
         if (threadIdx.x == 0)
@@ -112,7 +113,7 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
             P res;
             for (int j = 0; j < P::size; j++)
                 res.data[j] = float(buf.data[j]) + float(dst.data[j]);
-            reinterpret_cast<P*>(buffer + recv_chunk*chunk_off + off)[i] = res;
+            reinterpret_cast<P*>(output + recv_chunk*chunk_off + off)[i] = res;
         }
         stage++;
         send_chunk = recv_chunk;
@@ -122,10 +123,10 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
             recv_chunk = (n_pes + recv_chunk - 1)%n_pes;
     }
 
-    for (int chunk = 0; chunk < n_pes - 1; chunk++) 
+    for (int chunk = 0; chunk < n_pes - 1; chunk++)
     {
         nvshmemx_putmem_signal_nbi_block(destination + off + send_chunk*chunk_off,
-                buffer + send_chunk*chunk_off + off,
+                output + send_chunk*chunk_off + off,
                 block_size, local_signal, stage, NVSHMEM_SIGNAL_SET, send_peer);
 
         if (threadIdx.x == 0)
@@ -134,7 +135,7 @@ __global__ void all_reduce_ring_kernel(scalar_t* __restrict__ destination, scala
 
         for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
         {
-            reinterpret_cast<P*>(buffer + recv_chunk*chunk_off + off)[i] =
+            reinterpret_cast<P*>(output + recv_chunk*chunk_off + off)[i] =
                 reinterpret_cast<P*>(destination + off+ recv_chunk*chunk_off)[i];
         }
         stage++;
@@ -154,24 +155,26 @@ AllReduceRingStandard::AllReduceRingStandard(half* _buffer, int numel, int packe
     grid_dim.x = std::ceil(numel*sizeof(half) / float(packet_size*block_size*nvshmem_n_pes()*routes));
     grid_dim.y = routes;
 }
-void AllReduceRingStandard::run(cudaStream_t stream)
+void AllReduceRingStandard::run(half* output, cudaStream_t stream)
 {
     if(internode)
     {
         all_reduce_ring_kernel<half, true><<<grid_dim, block_dim, 0, stream>>>(
                 destination,
                 static_cast<half*>(buffer),
+                output,
                 signal,
                 packet_size,
                 gpus_per_node,
                 stage
                 );
     }
-    else 
+    else
     {
         all_reduce_ring_kernel<half, false><<<grid_dim, block_dim, 0, stream>>>(
                 destination,
                 static_cast<half*>(buffer),
+                output,
                 signal,
                 packet_size,
                 gpus_per_node,

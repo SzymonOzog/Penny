@@ -10,10 +10,8 @@
 #include <nvshmemx.h>
 #include "common.h"
 
-__device__ int buffer_lock[4] = {0};
-
 template <typename scalar_t, int N_PES = 8>
-__global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, uint64_t* __restrict__ signal,
+__global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, scalar_t* __restrict__ buffer, scalar_t* __restrict__ output, uint64_t* __restrict__ signal,
         const int packet_size, const int gpus_per_node, int stage)
 {
     using P = array_t<scalar_t, 16/sizeof(scalar_t)>;
@@ -69,7 +67,7 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
                 res.data[j] += float(src.data[j]);
             }
         }
-        reinterpret_cast<P*>(buffer +  reduce_off)[i] = res;
+        reinterpret_cast<P*>(output + reduce_off)[i] = res;
     }
 }
 
@@ -81,11 +79,12 @@ AllReduceOneShot::AllReduceOneShot(half* _buffer, int numel, int packet_size, in
     grid_dim.x = nvshmem_n_pes();
     grid_dim.y = routes;
 }
-void AllReduceOneShot::run(cudaStream_t stream)
+void AllReduceOneShot::run(half* output, cudaStream_t stream)
 {
     all_reduce_oneshot_kernel<half><<<grid_dim, block_dim, 0, stream>>>(
             destination,
             static_cast<half*>(buffer),
+            output,
             signal,
             packet_size,
             gpus_per_node,

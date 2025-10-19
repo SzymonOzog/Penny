@@ -16,7 +16,7 @@
 __device__ int buffer_lock_[4] = {0};
 
 template <typename scalar_t, int N_PES=8>
-__global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, scalar_t*  buffer, uint64_t* signal,
+__global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, scalar_t*  buffer, scalar_t* __restrict__ output, uint64_t* signal,
         const int packet_size, const int gpus_per_node, int stage)
 {
     using P = array_t<scalar_t, 16/sizeof(scalar_t)>;
@@ -63,7 +63,7 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
                 res.data[j] += float(src.data[j]);
             }
         }
-        reinterpret_cast<P*>(buffer + pe * pe_off + reduce_off)[i] = res;
+        reinterpret_cast<P*>(output + pe * pe_off + reduce_off)[i] = res;
     }
 
     __syncthreads();
@@ -87,7 +87,7 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
     if(blockIdx.y == 0)
     {
         nvshmemx_putmem_signal_nbi_block(destination + (n_pes+pe)*pe_off,
-                buffer + pe*pe_off,
+                output + pe*pe_off,
                 block_size, signal+n_pes+pe, stage, NVSHMEM_SIGNAL_SET, write_chunk);
     }
 
@@ -100,7 +100,7 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
 
     for (int i = threadIdx.x; i < write_size/(sizeof(P)); i += blockDim.x)
     {
-        reinterpret_cast<P*>(buffer + write_chunk*pe_off + write_off)[i] =
+        reinterpret_cast<P*>(output + write_chunk*pe_off + write_off)[i] =
             reinterpret_cast<P*>(destination + (n_pes+write_chunk)*pe_off + write_off)[i];
     }
 }
@@ -115,11 +115,12 @@ AllReduceTwoShot::AllReduceTwoShot(half* _buffer, int numel, int packet_size, in
     grid_dim.x = nvshmem_n_pes();
     grid_dim.y = routes;
 }
-void AllReduceTwoShot::run(cudaStream_t stream)
+void AllReduceTwoShot::run(half* output, cudaStream_t stream)
 {
     all_reduce_twoshot_kernel<half><<<grid_dim, block_dim, 0, stream>>>(
             destination,
             static_cast<half*>(buffer),
+            output,
             signal,
             packet_size,
             gpus_per_node,

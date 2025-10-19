@@ -57,7 +57,7 @@ def main():
             best_time = float("inf")
             best_configuration = None
             packet_sizes = [-1] if args.algo in [3, 4] else args.packet_sizes
-            n_routes = [1, 2, 4, 8, 16, 32] if args.algo == 4 else [1]
+            n_routes = [1, 2, 4, 8, 16, 32] if args.algo in [3, 4] else [1]
             for packet_size in packet_sizes:
                 for block_size in args.block_sizes:
                     for routes in n_routes:
@@ -85,6 +85,7 @@ def main():
                         data = torch.ones(num, device="cuda", dtype=torch.float16) * torch.tensor(mul).to(data.device)
                         data2 = data.clone()
                         data3 = data.clone()
+                        penny_out = torch.empty_like(data);
                         recv_bytes = 2 * data2.nelement() * data2.element_size()
                         handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, routes, args.algo)
 
@@ -95,17 +96,17 @@ def main():
 
                             with record_function(configuration):
                                 dist.all_reduce(data)
-                                penny_cpp.all_reduce_run(handle)
+                                penny_cpp.all_reduce_run(handle, penny_out)
                                 if custom_ar is not None:
                                     data3 = custom_ar.all_reduce(data3)
 
 
-                            if not torch.allclose(data, data2, atol=args.atol, rtol=args.rtol):
-                                idx = torch.isclose(data, data2, atol=args.atol, rtol=args.rtol)
+                            if not torch.allclose(data, penny_out, atol=args.atol, rtol=args.rtol):
+                                idx = torch.isclose(data, penny_out, atol=args.atol, rtol=args.rtol)
                                 num_missed = idx.logical_not().sum() / idx.nelement()
-                                print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {data2.mean()}")
+                                print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {penny_out.mean()}")
                                 print(data[idx.logical_not()][:10])
-                                print(data2[idx.logical_not()][:10])
+                                print(penny_out[idx.logical_not()][:10])
                                 print(data[:10])
 
                             if not torch.allclose(data, data3, atol=args.atol, rtol=args.rtol) and rank == 0:
@@ -119,7 +120,7 @@ def main():
                                 print(data3[:10])
 
                         if args.profile_mode == "info" or args.profile_mode == "verbose":
-                            penny_time = bench_kineto(lambda: penny_cpp.all_reduce_run(handle),
+                            penny_time = bench_kineto(lambda: penny_cpp.all_reduce_run(handle, penny_out),
                                                       kernel_name="all_reduce")
                             nccl_time = bench_kineto(lambda: dist.all_reduce(data), kernel_name="AllReduce_Sum_f16")
                             if custom_ar is not None:

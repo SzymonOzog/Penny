@@ -45,7 +45,7 @@ public:
         nvshmem_free(signal);
     }
 
-    virtual void run(cudaStream_t stream) = 0;
+    virtual void run(half* output, cudaStream_t stream) = 0;
 
     half* destination;
     half* buffer;
@@ -61,14 +61,14 @@ class AllReduceRingSimple : public AllReduce
 {
 public:
     AllReduceRingSimple(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream);
-    virtual void run(cudaStream_t stream) override;
+    virtual void run(half* output, cudaStream_t stream) override;
 };
 
 class AllReduceRingStandard : public AllReduce
 {
 public:
     AllReduceRingStandard(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream);
-    virtual void run(cudaStream_t stream) override;
+    virtual void run(half* output, cudaStream_t stream) override;
     const bool internode;
 };
 
@@ -76,14 +76,14 @@ class AllReduceOneShot : public AllReduce
 {
 public:
     AllReduceOneShot(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream);
-    virtual void run(cudaStream_t stream) override;
+    virtual void run(half* output, cudaStream_t stream) override;
 };
 
 class AllReduceTwoShot : public AllReduce
 {
 public:
     AllReduceTwoShot(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream);
-    virtual void run(cudaStream_t stream) override;
+    virtual void run(half* output, cudaStream_t stream) override;
 };
 
 inline void* create_all_reduce(half* buffer, int numel, int packet_size, int block_size, int nnodes, int routes, AlgoType algo_type, cudaStream_t stream)
@@ -112,7 +112,7 @@ inline void destroy_all_reduce(void* all_reduce_obj)
     delete reinterpret_cast<AllReduce*>(all_reduce_obj);
 }
 
-inline void all_reduce(void* all_reduce_obj, cudaStream_t stream) 
+inline void all_reduce(void* all_reduce_obj, half* output, cudaStream_t stream)
 {
-    reinterpret_cast<AllReduce*>(all_reduce_obj)->run(stream);
+    reinterpret_cast<AllReduce*>(all_reduce_obj)->run(output, stream);
 }
