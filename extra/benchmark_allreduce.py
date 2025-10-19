@@ -56,7 +56,7 @@ def main():
             num = 2 ** pow
             best_time = float("inf")
             best_configuration = None
-            packet_sizes = [-1] if args.algo in [3, 4] else args.packet_sizes
+            packet_sizes = [-1] if args.algo in [3] else args.packet_sizes
             n_routes = [1, 2, 4, 8, 16, 32] if args.algo in [3, 4] else [1]
             for packet_size in packet_sizes:
                 for block_size in args.block_sizes:
@@ -69,6 +69,8 @@ def main():
                             continue
                         if args.algo == 2:
                             packet_size = (num*elem_size)//block_size
+                            if int((num*elem_size)/(packet_size*block_size)) != (num*elem_size)//(packet_size*block_size):
+                                continue
                         if args.algo == 3:
                             packet_size = (num*elem_size)//(block_size*world_size)
                         if args.algo in [2, 3]:

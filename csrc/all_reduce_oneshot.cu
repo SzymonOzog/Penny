@@ -18,35 +18,23 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
 
     const uint32_t block_size = blockDim.x * packet_size;
     const uint32_t pe_off = block_size/sizeof(scalar_t);
+    const uint32_t off = blockIdx.z * N_PES*block_size * pe_off;
 
     const int pe = nvshmem_my_pe();
     const int n_pes = nvshmem_n_pes();
 
-    auto reduce = [&](scalar_t* s1_p, scalar_t* s2_p, scalar_t* dst)
-    {
-        for (int i = threadIdx.x; i < block_size/(sizeof(P)); i += blockDim.x)
-        {
-            P src1 = reinterpret_cast<P*>(s1_p)[i];
-            P src2 = reinterpret_cast<P*>(s2_p)[i];
-            P res;
-            for (int j = 0; j < P::size; j++)
-                res.data[j] = float(src1.data[j]) + float(src2.data[j]);
-            reinterpret_cast<P*>(dst)[i] = res;
-        }
-    };
-
     if (blockIdx.x != pe && blockIdx.y == 0)
     {
-            nvshmemx_putmem_signal_nbi_block(destination + pe*pe_off,
-                    buffer,
-                    block_size, signal+pe, stage, NVSHMEM_SIGNAL_SET, blockIdx.x);
+            nvshmemx_putmem_signal_nbi_block(destination + pe*pe_off + off,
+                    buffer + off,
+                    block_size, signal+pe + blockIdx.z*N_PES, stage, NVSHMEM_SIGNAL_SET, blockIdx.x);
     }
 
     for(int tid = 0; tid<N_PES; tid++)
     {
         if (threadIdx.x == tid && tid != pe)
         {
-            nvshmem_signal_wait_until(signal+tid, NVSHMEM_CMP_EQ, stage);
+            nvshmem_signal_wait_until(signal+tid + blockIdx.z*N_PES, NVSHMEM_CMP_EQ, stage);
         }
     }
 
@@ -56,28 +44,28 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
 
     for (int i = threadIdx.x; i < reduce_size/(sizeof(P)); i += blockDim.x)
     {
-        P res = reinterpret_cast<P*>(buffer + reduce_off)[i];
+        P res = reinterpret_cast<P*>(buffer + reduce_off + off)[i];
         for (int recv_pe = 0; recv_pe < N_PES; recv_pe++)
         {
             if(recv_pe == pe)
                 continue;
-            P src = reinterpret_cast<P*>(destination + recv_pe*pe_off + reduce_off)[i];
+            P src = reinterpret_cast<P*>(destination + recv_pe*pe_off + reduce_off + off)[i];
             for (int j = 0; j < P::size; j++)
             {
                 res.data[j] += float(src.data[j]);
             }
         }
-        reinterpret_cast<P*>(output + reduce_off)[i] = res;
+        reinterpret_cast<P*>(output + reduce_off + off)[i] = res;
     }
 }
 
 AllReduceOneShot::AllReduceOneShot(half* _buffer, int numel, int packet_size, int block_size, int nnodes, int routes, cudaStream_t stream)
     : AllReduce(_buffer, numel, numel*nvshmem_n_pes(), packet_size, block_size, nnodes,
-            nvshmem_n_pes(), stream)
+            nvshmem_n_pes() * numel*sizeof(half)/(block_size*packet_size), stream)
 {
-    assert(packet_size*block_size  == numel * sizeof(half));
     grid_dim.x = nvshmem_n_pes();
     grid_dim.y = routes;
+    grid_dim.z = numel*sizeof(half)/(block_size*packet_size);
 }
 void AllReduceOneShot::run(half* output, cudaStream_t stream)
 {
