@@ -18,14 +18,14 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
 
     const uint32_t block_size = blockDim.x * packet_size;
     const uint32_t pe_off = block_size/sizeof(scalar_t);
-    const uint32_t off = blockIdx.z * N_PES*block_size * pe_off;
+    const uint32_t off = blockIdx.z * pe_off;
 
     const int pe = nvshmem_my_pe();
     const int n_pes = nvshmem_n_pes();
 
     if (blockIdx.x != pe && blockIdx.y == 0)
     {
-            nvshmemx_putmem_signal_nbi_block(destination + pe*pe_off + off,
+            nvshmemx_putmem_signal_nbi_block(destination + pe*pe_off + off*N_PES,
                     buffer + off,
                     block_size, signal+pe + blockIdx.z*N_PES, stage, NVSHMEM_SIGNAL_SET, blockIdx.x);
     }
@@ -41,6 +41,9 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
     __syncthreads();
     const uint32_t reduce_size = block_size/(N_PES*gridDim.y);
     const uint32_t reduce_off = (blockIdx.y*gridDim.x + blockIdx.x)*reduce_size/sizeof(scalar_t);
+    // if(pe == 0 && blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0)
+    //     printf("reducing z %d sz %d, off %d, buff %d, pe_of %d, block_size %d, off %d\n",
+    //             blockIdx.z, reduce_size, reduce_off, int(buffer[reduce_off + off]), pe_off, block_size, off);
 
     for (int i = threadIdx.x; i < reduce_size/(sizeof(P)); i += blockDim.x)
     {
@@ -49,7 +52,7 @@ __global__ void all_reduce_oneshot_kernel(scalar_t* __restrict__ destination, sc
         {
             if(recv_pe == pe)
                 continue;
-            P src = reinterpret_cast<P*>(destination + recv_pe*pe_off + reduce_off + off)[i];
+            P src = reinterpret_cast<P*>(destination + recv_pe*pe_off + reduce_off + off*N_PES)[i];
             for (int j = 0; j < P::size; j++)
             {
                 res.data[j] += float(src.data[j]);
@@ -65,7 +68,7 @@ AllReduceOneShot::AllReduceOneShot(half* _buffer, int numel, int packet_size, in
 {
     grid_dim.x = nvshmem_n_pes();
     grid_dim.y = routes;
-    grid_dim.z = numel*sizeof(half)/(block_size*packet_size);
+    grid_dim.z = (numel*sizeof(half))/(block_size*packet_size);
 }
 void AllReduceOneShot::run(half* output, cudaStream_t stream)
 {

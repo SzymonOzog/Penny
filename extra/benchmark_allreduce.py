@@ -68,8 +68,9 @@ def main():
                         if args.algo == 1 and (num * elem_size) % (packet_size * block_size * routes) != 0:
                             continue
                         if args.algo == 2:
-                            packet_size = (num*elem_size)//block_size
-                            if int((num*elem_size)/(packet_size*block_size)) != (num*elem_size)//(packet_size*block_size):
+                            # packet_size = (num*elem_size)//block_size
+                            if int((num*elem_size)/(packet_size*block_size)) != (num*elem_size)//(packet_size*block_size) or \
+                                    (num*elem_size)//(packet_size*block_size) == 0:
                                 continue
                         if args.algo == 3:
                             packet_size = (num*elem_size)//(block_size*world_size)
@@ -101,13 +102,14 @@ def main():
                                     data3 = custom_ar.all_reduce(data3)
 
 
-                            if not torch.allclose(data, penny_out, atol=args.atol, rtol=args.rtol):
+                            if not torch.allclose(data, penny_out, atol=args.atol, rtol=args.rtol) and rank == 0:
                                 idx = torch.isclose(data, penny_out, atol=args.atol, rtol=args.rtol)
                                 num_missed = idx.logical_not().sum() / idx.nelement()
                                 print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {penny_out.mean()}")
                                 print(data[idx.logical_not()][:10])
                                 print(penny_out[idx.logical_not()][:10])
                                 print(data[:10])
+                                print(penny_out[:10])
 
                             if not torch.allclose(data, data3, atol=args.atol, rtol=args.rtol) and rank == 0:
                                 idx = torch.isclose(data, data3, atol=args.atol, rtol=args.rtol)
@@ -116,7 +118,6 @@ def main():
                                 print(data[idx.logical_not()][:10])
                                 print(data3[idx.logical_not()][:10])
                                 print(data[:10])
-                                print(data3[:10])
                                 print(data3[:10])
 
                         if args.profile_mode == "info" or args.profile_mode == "verbose":
