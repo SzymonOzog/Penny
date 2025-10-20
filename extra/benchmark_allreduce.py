@@ -113,7 +113,7 @@ def main():
                                 print(data[:10])
                                 print(penny_out[:10])
 
-                            if not torch.allclose(data, data3, atol=args.atol, rtol=args.rtol) and rank == 0:
+                            if custom_ar is not None and not torch.allclose(data, data3, atol=args.atol, rtol=args.rtol) and rank == 0:
                                 idx = torch.isclose(data, data3, atol=args.atol, rtol=args.rtol)
                                 num_missed = idx.logical_not().sum() / idx.nelement()
                                 print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {data3.mean()}")
