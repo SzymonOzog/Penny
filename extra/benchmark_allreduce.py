@@ -31,6 +31,8 @@ def main():
                         help="What power of 2 size to start from")
     parser.add_argument("--num-tests", type=int, default=3,
                         help="How many tests in a row to run")
+    parser.add_argument("--bench_custom", type=bool, default=False,
+                        help="Do we want to also bench against vLLM custom all reduce(long init time)")
 
     args = parser.parse_args()
 
@@ -40,7 +42,7 @@ def main():
     nnodes = int(os.getenv("NNODES", "1"))
     local_size = world_size // nnodes
     local_rank = rank % local_size
-    if nnodes == 1:
+    if nnodes == 1 and args.bench_custom:
         from vllm.distributed.device_communicators.custom_all_reduce import CustomAllreduce
         group = dist.new_group(list(range(world_size)), backend="gloo") 
         custom_ar = CustomAllreduce(group, device=local_rank, max_size = 2**(args.start_pow + args.range))
