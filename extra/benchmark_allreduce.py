@@ -43,7 +43,7 @@ def main():
     local_size = world_size // nnodes
     local_rank = rank % local_size
     if nnodes == 1 and args.bench_custom:
-        from vllm.distributed.device_communicators.custom_all_reduce import CustomAllreduce
+        from penny.custom_all_reduce import CustomAllreduce
         group = dist.new_group(list(range(world_size)), backend="gloo") 
         custom_ar = CustomAllreduce(group, device=local_rank, max_size = 2**(args.start_pow + args.range))
     else:
