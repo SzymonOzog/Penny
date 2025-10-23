@@ -30,6 +30,26 @@ void destroy_all_reduce(void* all_reduce_obj);
 void all_reduce(void* all_reduce_obj, half* output, cudaStream_t stream);
 void exchange(torch::Tensor& buffer, int packet_size, int block_size, int peer);
 
+//Custom allreduce
+using fptr_t = int64_t;
+fptr_t init_custom_ar(const std::vector<int64_t>& fake_ipc_ptrs,
+                      torch::Tensor& rank_data, int64_t rank,
+                      bool fully_connected);
+void custom_all_reduce(fptr_t _fa, torch::Tensor& inp, torch::Tensor& out,
+                fptr_t reg_buffer, int64_t reg_buffer_sz_bytes);
+void dispose(fptr_t _fa);
+int64_t meta_size();
+void register_buffer(fptr_t _fa, const std::vector<int64_t>& fake_ipc_ptrs);
+std::tuple<std::vector<int64_t>, std::vector<int64_t>>
+get_graph_buffer_ipc_meta(fptr_t _fa);
+void register_graph_buffers(fptr_t _fa,
+                            const std::vector<std::vector<int64_t>>& handles,
+                            const std::vector<std::vector<int64_t>>& offsets);
+std::tuple<int64_t, torch::Tensor> allocate_shared_buffer_and_handle(
+    int64_t size);
+int64_t open_mem_handle(torch::Tensor& mem_handle);
+void free_shared_buffer(int64_t buffer);
+
 pybind11::bytearray get_nvshmem_unique_id() 
 {
     nvshmemx_uniqueid_t unique_id;
@@ -90,4 +110,26 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("all_reduce_destroy", [](uintptr_t handle) {
             destroy_all_reduce(reinterpret_cast<void*>(handle));
             });
+    //
+    // m.def("init_custom_ar(int[] ipc_tensors, Tensor rank_data, "
+    //         "int rank, bool fully_connected) -> int");
+    m.def("init_custom_ar", &init_custom_ar);
+    // m.def(
+    //         "all_reduce(int fa, Tensor inp, Tensor! out, int reg_buffer, "
+    //         "int reg_buffer_sz_bytes) -> ()");
+    m.def("all_reduce", &custom_all_reduce);
+
+    m.def("dispose", &dispose);
+    m.def("meta_size", &meta_size);
+
+    m.def("register_buffer", &register_buffer);
+    m.def("get_graph_buffer_ipc_meta", &get_graph_buffer_ipc_meta);
+    m.def("register_graph_buffers", &register_graph_buffers);
+
+    m.def("allocate_shared_buffer_and_handle",
+            &allocate_shared_buffer_and_handle);
+    // m.def("open_mem_handle(Tensor mem_handle) -> int", &open_mem_handle);
+    m.def("open_mem_handle", &open_mem_handle);
+
+    m.def("free_shared_buffer", &free_shared_buffer);
 }

@@ -24,6 +24,7 @@ if __name__ == '__main__':
                "csrc/all_reduce_oneshot.cu",
                "csrc/all_reduce_twoshot.cu",
                "csrc/all_reduce_double_ring.cu",
+               "csrc/custom_all_reduce.cu",
                ]
     include_dirs = ['csrc/', nvshmem_inc]
     library_dirs = [nvshmem_lib]
