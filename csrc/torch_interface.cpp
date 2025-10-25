@@ -44,6 +44,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("init_with_uid", &init_with_uid);
     m.def("exchange", &exchange);
 
+    m.def("nvshmem_register", [] (torch::Tensor& buffer){
+            nvshmemx_buffer_register(buffer.data_ptr(), buffer.numel() * buffer.element_size());
+            });
+    m.def("nvshmem_unregister", [] (torch::Tensor& buffer){
+            nvshmemx_buffer_unregister(buffer.data_ptr());
+            });
     m.def("all_reduce_create", [](torch::Tensor& buffer, int packet_size, int block_size, int nnodes, int routes, int algo) {
             auto stream = at::cuda::getCurrentCUDAStream();
             assert(algo >= 0);

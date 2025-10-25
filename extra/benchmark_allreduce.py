@@ -91,6 +91,7 @@ def main():
                         data2 = data.clone()
                         data3 = data.clone()
                         penny_out = torch.empty_like(data);
+                        penny_cpp.nvshmem_register(penny_out)
                         recv_bytes = 2 * data2.nelement() * data2.element_size()
                         handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, routes, args.algo)
 
@@ -147,6 +148,7 @@ def main():
                                       f"bandwidth {recv_bytes / 1e3 / custom_time :.2f} GB/s"
                                       )
                         penny_cpp.all_reduce_destroy(handle)
+                        penny_cpp.nvshmem_unregister(penny_out)
 
             if rank == 0 and args.profile_mode == "info" and best_configuration is None:
                 print(f"no configuration found for {num=}")
