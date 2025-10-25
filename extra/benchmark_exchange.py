@@ -112,6 +112,8 @@ def main():
                       f"penny_time time: {best_time:.2f}us, "
                       f"bandwidth {recv_bytes / 1e3 / best_time :.2f} GB/s")
 
+    if rank == 0:
+        print("running benchmark")
     if args.profile_mode == "file" and rank == 0:
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
             run_benchmark()
