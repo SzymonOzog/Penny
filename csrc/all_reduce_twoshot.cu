@@ -64,6 +64,7 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
         reinterpret_cast<P*>(output + pe*pe_off + off + reduce_off)[i] = res;
     }
 
+    __threadfence_system();
     __syncthreads();
     if (threadIdx.x == 0)
     {
@@ -81,7 +82,6 @@ __global__ void all_reduce_twoshot_kernel(scalar_t* __restrict__ destination, sc
     }
 
     __syncthreads();
-    __threadfence_system();
 
     if(blockIdx.y == 0)
     {
