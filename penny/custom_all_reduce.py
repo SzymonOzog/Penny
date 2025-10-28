@@ -4,11 +4,15 @@ from contextlib import contextmanager
 from typing import Optional, Union
 
 import torch
+import os
 import torch.distributed as dist
 from torch.distributed import ProcessGroup
 import logging 
 logger = logging.getLogger(__name__)
 import penny_cpp as ops
+#TODO
+nnodes = int(os.getenv("NNODES", "1"))
+
 
 try:
     ops.meta_size()
@@ -87,7 +91,7 @@ class CustomAllreduce:
 
         rank = dist.get_rank(group=self.group)
         self.rank = rank
-        world_size = dist.get_world_size(group=self.group)
+        world_size = dist.get_world_size(group=self.group) // nnodes
         if world_size == 1:
             # No need to initialize custom allreduce for single GPU case.
             return
@@ -122,16 +126,16 @@ class CustomAllreduce:
         else:
             device_ids = list(range(world_size))
 
-        physical_device_id = device_ids[device.index]
-        tensor = torch.tensor([physical_device_id],
-                              dtype=torch.int,
-                              device="cpu")
-        gather_list = [
-            torch.tensor([0], dtype=torch.int, device="cpu")
-            for _ in range(world_size)
-        ]
-        dist.all_gather(gather_list, tensor, group=self.group)
-        physical_device_ids = [t.item() for t in gather_list]
+        # physical_device_id = device_ids[device.index]
+        # tensor = torch.tensor([physical_device_id],
+        #                       dtype=torch.int,
+        #                       device="cpu")
+        # gather_list = [
+        #     torch.tensor([0], dtype=torch.int, device="cpu")
+        #     for _ in range(world_size)
+        # ]
+        # dist.all_gather(gather_list, tensor, group=self.group)
+        # physical_device_ids = [t.item() for t in gather_list]
 
         # test nvlink first, this will filter out most of the cases
         # where custom allreduce is not supported
@@ -175,10 +179,10 @@ class CustomAllreduce:
                                      dtype=torch.uint8,
                                      device=self.device)
         self.max_size = max_size
-        self.rank = rank
+        self.rank = rank%world_size
         self.world_size = world_size
         self.fully_connected = True
-        self._ptr = ops.init_custom_ar(self.meta_ptrs, self.rank_data, rank,
+        self._ptr = ops.init_custom_ar(self.meta_ptrs, self.rank_data, self.rank,
                                        self.fully_connected)
         ops.register_buffer(self._ptr, self.buffer_ptrs)
 
@@ -199,7 +203,6 @@ class CustomAllreduce:
 
     def register_graph_buffers(self):
         handle, offset = ops.get_graph_buffer_ipc_meta(self._ptr)
-        logger.info("Registering %d cuda graph addresses", len(offset))
         # We cannot directly use `dist.all_gather_object` here
         # because it is incompatible with `gloo` backend under inference mode.
         # see https://github.com/pytorch/pytorch/issues/126032 for details.
@@ -288,13 +291,16 @@ class CustomAllreduce:
         pointer, handle = ops.allocate_shared_buffer_and_handle(size_in_bytes)
 
         world_size = dist.get_world_size(group=group)
+        local_size = world_size//nnodes
         rank = dist.get_rank(group=group)
         handles = [None] * world_size
         dist.all_gather_object(handles, handle, group=group)
+        off = (rank//local_size)*local_size
+        handles = handles[off :  off + local_size]
 
         pointers: list[int] = []
         for i, h in enumerate(handles):
-            if i == rank:
+            if i == dist.get_node_local_rank():
                 pointers.append(pointer)  # type: ignore
             else:
                 pointers.append(ops.open_mem_handle(h))
