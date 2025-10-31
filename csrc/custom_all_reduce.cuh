@@ -316,21 +316,22 @@ __global__ void __launch_bounds__(512, 1)
     ((P*)result)[idx] = packed_reduce<P, ngpus, A>((const P**)&dp.ptrs[0], idx);
   }
   barrier_at_end<ngpus, true>(sg, self_sg, rank);
-  // int pe = nvhsmem_my_pe();
+
+  //TODO this will fail with > 1 block
+  __syncthreads();
+  uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
   const int pe = nvshmem_my_pe();
-  uint64_t* local_signal = signal + (pe%8);
+  uint64_t* local_signal = signal;
   int exchange_pe = (pe + 8)%16;
   if (blockIdx.x == 0)
   {
-      // if(threadIdx.x == 0 && nvhsmem_my_pe()%8 == 1)
-      //     printf(" pre %d sending data to %d, signal %d\n", rank, exchange_pe, rank%8);
       nvshmemx_putmem_signal_nbi_block(buffer, result, size*sizeof(P),
-              local_signal, 1, NVSHMEM_SIGNAL_SET, exchange_pe);
+              local_signal, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
   }
 
   if(threadIdx.x == 0)
   {
-      nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_EQ, 1);
+      nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_EQ, new_signal);
       nvshmem_fence();
   }
   __syncthreads();
