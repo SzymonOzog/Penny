@@ -324,7 +324,7 @@ __global__ void __launch_bounds__(512, 1)
   {
       // if(threadIdx.x == 0 && nvhsmem_my_pe()%8 == 1)
       //     printf(" pre %d sending data to %d, signal %d\n", rank, exchange_pe, rank%8);
-      nvshmemx_putmem_signal_nbi_block(buffer, result, size*sizeof(T),
+      nvshmemx_putmem_signal_nbi_block(buffer, result, size*sizeof(P),
               local_signal, 1, NVSHMEM_SIGNAL_SET, exchange_pe);
   }
 
