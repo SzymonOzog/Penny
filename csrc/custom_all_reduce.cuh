@@ -4,6 +4,10 @@
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include "host/nvshmem_api.h"
+#include "host/nvshmemx_api.h"
+#include <nvshmem.h>
+#include <nvshmemx.h>
 
 #if defined(USE_ROCM)
 typedef __hip_bfloat16 nv_bfloat16;
@@ -298,7 +302,8 @@ DINLINE P packed_reduce(const P* ptrs[], int idx) {
 template <typename T, int ngpus>
 __global__ void __launch_bounds__(512, 1)
     cross_device_reduce_1stage(RankData* _dp, RankSignals sg, Signal* self_sg,
-                               T* __restrict__ result, int rank, int size) {
+                               T* __restrict__ result, int rank, int size, 
+                               void* buffer, uint64_t * signal) {
   using P = typename packed_t<T>::P;
   using A = typename packed_t<T>::A;
   // note: we don't reorder the address so the accumulation order is the same
@@ -311,6 +316,35 @@ __global__ void __launch_bounds__(512, 1)
     ((P*)result)[idx] = packed_reduce<P, ngpus, A>((const P**)&dp.ptrs[0], idx);
   }
   barrier_at_end<ngpus, true>(sg, self_sg, rank);
+  // int pe = nvhsmem_my_pe();
+  const int pe = nvshmem_my_pe();
+  uint64_t* local_signal = signal + (pe%8);
+  int exchange_pe = (pe + 8)%16;
+  if (blockIdx.x == 0)
+  {
+      // if(threadIdx.x == 0 && nvhsmem_my_pe()%8 == 1)
+      //     printf(" pre %d sending data to %d, signal %d\n", rank, exchange_pe, rank%8);
+      nvshmemx_putmem_signal_nbi_block(buffer, result, size*sizeof(T),
+              local_signal, 1, NVSHMEM_SIGNAL_SET, exchange_pe);
+  }
+
+  if(threadIdx.x == 0)
+  {
+      nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_EQ, 1);
+      nvshmem_fence();
+  }
+  __syncthreads();
+  for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < size;
+       idx += gridDim.x * blockDim.x) {
+        P res = reinterpret_cast<P*>(result)[idx];
+        P buf = reinterpret_cast<P*>(buffer)[idx];
+        for (int j = 0; j < P::size; j++)
+        {
+            res.data[j] += float(buf.data[j]);
+        }
+        reinterpret_cast<P*>(result)[idx] = res;
+  }
+
 }
 
 template <typename P>
@@ -321,7 +355,8 @@ DINLINE P* get_tmp_buf(Signal* sg) {
 template <typename T, int ngpus>
 __global__ void __launch_bounds__(512, 1)
     cross_device_reduce_2stage(RankData* _dp, RankSignals sg, Signal* self_sg,
-                               T* __restrict__ result, int rank, int size) {
+                               T* __restrict__ result, int rank, int size, 
+                               void* buffer, uint64_t * signal) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = gridDim.x * blockDim.x;
   using P = typename packed_t<T>::P;
@@ -402,6 +437,9 @@ class CustomAllreduce {
   // a map from IPC handles to opened IPC pointers
   std::map<IPC_KEY, char*> ipc_handles_;
 
+  uint64_t* signal;
+  void* buffer;
+
   /**
    * Signals are an array of ipc-enabled buffers from all ranks.
    * For each of the buffer, the layout is as follows:
@@ -423,6 +461,12 @@ class CustomAllreduce {
         d_rank_data_end_(d_rank_data_base_ + rank_data_sz / sizeof(RankData)) {
     for (int i = 0; i < world_size_; i++) {
       sg_.signals[i] = signals[i];
+      signal = (uint64_t*) nvshmem_malloc(kMaxBlocks * sizeof(uint64_t));
+      cudaMemset(signal, 0, kMaxBlocks * sizeof(uint64_t));
+      buffer = nvshmem_malloc(8192*1024);
+
+      //sync the memset before running kernel
+      nvshmem_barrier_all();
     }
   }
 
@@ -578,7 +622,7 @@ class CustomAllreduce {
 
 #define KL(ngpus, name)                                                       \
   name<T, ngpus><<<blocks, threads, 0, stream>>>(ptrs, sg_, self_sg_, output, \
-                                                 rank_, size);
+                                                 rank_, size, buffer, signal);
 #define REDUCE_CASE(ngpus)                              \
   case ngpus: {                                         \
     if (force_1stage) {                                 \

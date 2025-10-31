@@ -248,6 +248,8 @@ class CustomAllreduce:
         """
         if out is None:
             out = torch.empty_like(inp)
+            ops.nvshmem_register(out)
+
         if registered:
             ops.all_reduce(self._ptr, inp, out, 0, 0)
         else:
