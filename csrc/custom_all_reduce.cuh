@@ -242,6 +242,9 @@ DINLINE void barrier_at_end(const RankSignals& sg, Signal* self_sg, int rank) {
 
   // use one thread to update flag
   if (threadIdx.x == 0) self_sg->_flag[blockIdx.x] = flag;
+  if (blockIdx.x == 0 && threadIdx.x >= gridDim.x && threadIdx.x < kMaxBlocks)
+      self_sg->_flag[threadIdx.x] = flag;
+
 }
 
 #else
@@ -318,7 +321,6 @@ __global__ void __launch_bounds__(512, 1)
   }
   barrier_at_end<ngpus, true>(sg, self_sg, rank);
 
-  //TODO this will fail with > 1 block
   __syncthreads();
   uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
   const int pe = nvshmem_my_pe();
