@@ -248,7 +248,6 @@ class CustomAllreduce:
         """
         if out is None:
             out = torch.empty_like(inp)
-            ops.nvshmem_register(out)
 
         if registered:
             ops.all_reduce(self._ptr, inp, out, 0, 0)
@@ -257,14 +256,14 @@ class CustomAllreduce:
                            self.max_size)
         return out
 
-    def custom_all_reduce(self, input: torch.Tensor) -> Optional[torch.Tensor]:
+    def custom_all_reduce(self, input: torch.Tensor, out = None) -> Optional[torch.Tensor]:
         """The main allreduce API that provides support for cuda graph."""
         # When custom allreduce is disabled, this will be None.
         if self.disabled or not self.should_custom_ar(input):
             return None
         if self._IS_CAPTURING:
             if torch.cuda.is_current_stream_capturing():
-                return self.all_reduce(input, registered=True)
+                return self.all_reduce(input, out=out, registered=True)
             else:
                 # If warm up, mimic the allocation pattern since custom
                 # allreduce is out-of-place.
@@ -273,7 +272,7 @@ class CustomAllreduce:
             # Note: outside of cuda graph context, custom allreduce incurs a
             # cost of cudaMemcpy, which should be small (<=1% of overall
             # latency) compared to the performance gain of using custom kernels
-            return self.all_reduce(input, registered=False)
+            return self.all_reduce(input, out=out, registered=False)
 
     def close(self):
         if not self.disabled and self._ptr:
