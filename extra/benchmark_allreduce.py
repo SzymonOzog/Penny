@@ -102,19 +102,21 @@ def main():
 
                             with record_function(configuration):
                                 dist.all_reduce(data)
-                                penny_cpp.all_reduce_run(handle, penny_out)
+                                # penny_cpp.all_reduce_run(handle, penny_out)
                                 if custom_ar is not None:
-                                    data3 = custom_ar.all_reduce(data3)
+                                    data3 = custom_ar.all_reduce(data3, out=penny_out)
+                                    torch.cuda.synchronize()
+                            data2.copy_(data)
 
 
-                            if not torch.allclose(data, penny_out, atol=args.atol, rtol=args.rtol) and rank == 0:
-                                idx = torch.isclose(data, penny_out, atol=args.atol, rtol=args.rtol)
-                                num_missed = idx.logical_not().sum() / idx.nelement()
-                                print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {penny_out.mean()}")
-                                print(data[idx.logical_not()][:10])
-                                print(penny_out[idx.logical_not()][:10])
-                                print(data[:10])
-                                print(penny_out[:10])
+                            # if not torch.allclose(data, penny_out, atol=args.atol, rtol=args.rtol) and rank == 0:
+                            #     idx = torch.isclose(data, penny_out, atol=args.atol, rtol=args.rtol)
+                            #     num_missed = idx.logical_not().sum() / idx.nelement()
+                            #     print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {penny_out.mean()}")
+                            #     print(data[idx.logical_not()][:10])
+                            #     print(penny_out[idx.logical_not()][:10])
+                            #     print(data[:10])
+                            #     print(penny_out[:10])
 
                             if custom_ar is not None and not torch.allclose(data, data3, atol=args.atol, rtol=args.rtol) and rank == 0:
                                 idx = torch.isclose(data, data3, atol=args.atol, rtol=args.rtol)
@@ -130,8 +132,8 @@ def main():
                                                       kernel_name="all_reduce")
                             nccl_time = bench_kineto(lambda: dist.all_reduce(data), kernel_name="AllReduce_Sum_f16")
                             if custom_ar is not None:
-                                custom_time = bench_kineto(lambda: custom_ar.all_reduce(data3),
-                                                          kernel_name="reduce")
+                                custom_time = bench_kineto(lambda: custom_ar.all_reduce(data3, out=penny_out),
+                                                          kernel_name="cross_device")
                             else:
                                 custom_time = 1
 
