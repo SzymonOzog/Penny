@@ -309,11 +309,12 @@ __global__ void __launch_bounds__(512, 1)
   // note: we don't reorder the address so the accumulation order is the same
   // for all ranks, ensuring bitwise identical results
   auto dp = *_dp;
+  P* local_buffer = reinterpret_cast<P*>(buffer) + 2*size;
   barrier_at_start<ngpus>(sg, self_sg, rank);
   // do the actual reduction
   for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < size;
        idx += gridDim.x * blockDim.x) {
-    ((P*)result)[idx] = packed_reduce<P, ngpus, A>((const P**)&dp.ptrs[0], idx);
+    local_buffer[idx] = packed_reduce<P, ngpus, A>((const P**)&dp.ptrs[0], idx);
   }
   barrier_at_end<ngpus, true>(sg, self_sg, rank);
 
@@ -325,19 +326,18 @@ __global__ void __launch_bounds__(512, 1)
   int exchange_pe = (pe + 8)%16;
   if (blockIdx.x == 0)
   {
-      nvshmemx_putmem_signal_nbi_block(buffer, result, size*sizeof(P),
+      nvshmemx_putmem_signal_nbi_block(buffer, local_buffer, size*sizeof(P),
               local_signal, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
   }
 
   if(threadIdx.x == 0)
   {
       nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_EQ, new_signal);
-      nvshmem_fence();
   }
   __syncthreads();
   for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < size;
        idx += gridDim.x * blockDim.x) {
-        P res = reinterpret_cast<P*>(result)[idx];
+        P res = local_buffer[idx];
         P buf = reinterpret_cast<P*>(buffer)[idx];
         for (int j = 0; j < P::size; j++)
         {
