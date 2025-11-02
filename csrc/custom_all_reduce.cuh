@@ -312,7 +312,7 @@ __global__ void __launch_bounds__(512, 1)
   // note: we don't reorder the address so the accumulation order is the same
   // for all ranks, ensuring bitwise identical results
   auto dp = *_dp;
-  P* local_buffer = reinterpret_cast<P*>(buffer) + 2*size;
+  P* local_buffer = reinterpret_cast<P*>(buffer) + size;
   barrier_at_start<ngpus>(sg, self_sg, rank);
   // do the actual reduction
   for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < size;
@@ -376,12 +376,41 @@ __global__ void __launch_bounds__(512, 1)
     ptrs[i] = (const P*)_dp->ptrs[target];
     tmps[i] = get_tmp_buf<P>(sg.signals[target]);
   }
+  P* local_buffer = reinterpret_cast<P*>(buffer) + size;
   auto tmp_out = tmps[0];
   barrier_at_start<ngpus>(sg, self_sg, rank);
 
   // stage 1: reduce scatter
   for (int idx = start + tid; idx < end; idx += stride) {
-    tmp_out[idx - start] = packed_reduce<P, ngpus, A>(ptrs, idx);
+    local_buffer[idx - start] = packed_reduce<P, ngpus, A>(ptrs, idx);
+  }
+  barrier_at_end<ngpus>(sg, self_sg, rank);
+
+  __syncthreads();
+  uint64_t* local_signal = signal;
+  uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
+  const int pe = nvshmem_my_pe();
+  int exchange_pe = (pe + 8)%16;
+
+  if (blockIdx.x == 0)
+  {
+      nvshmemx_putmem_signal_nbi_block(buffer, local_buffer, part*sizeof(P),
+              local_signal, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
+  }
+
+  if(threadIdx.x == 0)
+  {
+      nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_EQ, new_signal);
+  }
+  __syncthreads();
+  for (int idx = start + tid; idx < end; idx += stride) {
+      P res = local_buffer[idx - start];
+      P buf = reinterpret_cast<P*>(buffer)[idx-start];
+      for (int j = 0; j < P::size; j++)
+      {
+          res.data[j] += float(buf.data[j]);
+      }
+      reinterpret_cast<P*>(tmp_out)[idx-start] = res;
   }
   barrier_at_end<ngpus>(sg, self_sg, rank);
 
