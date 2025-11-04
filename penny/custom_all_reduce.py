@@ -116,9 +116,9 @@ class CustomAllreduce:
         device_capability = "9.0"
         # if (current_platform.is_cuda() and symm_mem_enabled
         #         and device_capability in CUSTOM_ALL_REDUCE_MAX_SIZES):
-        max_size = min(
-            CUSTOM_ALL_REDUCE_MAX_SIZES[device_capability][world_size],
-            max_size)
+        # max_size = min(
+        #     CUSTOM_ALL_REDUCE_MAX_SIZES[device_capability][world_size],
+        #     max_size)
         # cuda_visible_devices = envs.CUDA_VISIBLE_DEVICES
         cuda_visible_devices = None
         if cuda_visible_devices:
