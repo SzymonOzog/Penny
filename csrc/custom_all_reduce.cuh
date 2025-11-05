@@ -306,7 +306,7 @@ DINLINE P packed_reduce(const P* ptrs[], int idx) {
   return downcast<P>(tmp);
 }
 
-template <typename T, int ngpus, int nnodes = 1>
+template <typename T, int ngpus, int nnodes = 2>
 __global__ void __launch_bounds__(512, 1)
     cross_device_reduce_1stage(RankData* _dp, RankSignals sg, Signal* self_sg,
                                T* __restrict__ result, int rank, int size, 
@@ -316,7 +316,10 @@ __global__ void __launch_bounds__(512, 1)
   // note: we don't reorder the address so the accumulation order is the same
   // for all ranks, ensuring bitwise identical results
   auto dp = *_dp;
-  P* local_buffer = nnodes == 1 ? reinterpret_cast<P*>(result) : reinterpret_cast<P*>(buffer) + size;
+  const int pe = nvshmem_my_pe();
+  const int node = pe/ngpus;
+  P* local_buffer = nnodes == 1 ? reinterpret_cast<P*>(result) 
+                                : reinterpret_cast<P*>(buffer) + node*size;
   barrier_at_start<ngpus>(sg, self_sg, rank);
   // do the actual reduction
   for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < size;
@@ -329,27 +332,33 @@ __global__ void __launch_bounds__(512, 1)
 
   __syncthreads();
   uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
-  const int pe = nvshmem_my_pe();
   uint64_t* local_signal = signal;
-  int exchange_pe = (pe + 8)%16;
   if (blockIdx.x == 0)
   {
-      nvshmemx_putmem_signal_nbi_block(buffer, local_buffer, size*sizeof(P),
-              local_signal, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
+      int send_node = blockIdx.x+1;
+      int exchange_pe = (pe + send_node*ngpus)%(nnodes*ngpus);
+      nvshmemx_putmem_signal_nbi_block(reinterpret_cast<P*>(buffer) + node*size,
+              local_buffer, size*sizeof(P),
+              local_signal + node, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
   }
 
-  if(threadIdx.x == 0)
+  if(threadIdx.x < nnodes && threadIdx.x != node)
   {
-      nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_EQ, new_signal);
+      nvshmem_signal_wait_until(local_signal + threadIdx.x, NVSHMEM_CMP_EQ, new_signal);
   }
   __syncthreads();
   for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < size;
        idx += gridDim.x * blockDim.x) {
         P res = local_buffer[idx];
-        P buf = reinterpret_cast<P*>(buffer)[idx];
-        for (int j = 0; j < P::size; j++)
+        for (int recv_node = 0; recv_node<nnodes; recv_node++)
         {
-            res.data[j] += float(buf.data[j]);
+            if(recv_node == node)
+                continue;
+            P buf = reinterpret_cast<P*>(buffer)[idx+recv_node*size];
+            for (int j = 0; j < P::size; j++)
+            {
+                res.data[j] += float(buf.data[j]);
+            }
         }
         reinterpret_cast<P*>(result)[idx] = res;
   }
@@ -361,7 +370,7 @@ DINLINE P* get_tmp_buf(Signal* sg) {
   return (P*)(((Signal*)sg) + 1);
 }
 
-template <typename T, int ngpus, int nnodes = 1>
+template <typename T, int ngpus, int nnodes = 2>
 __global__ void __launch_bounds__(512, 1)
     cross_device_reduce_2stage(RankData* _dp, RankSignals sg, Signal* self_sg,
                                T* __restrict__ result, int rank, int size, 
@@ -383,7 +392,10 @@ __global__ void __launch_bounds__(512, 1)
     tmps[i] = get_tmp_buf<P>(sg.signals[target]);
   }
   auto tmp_out = tmps[0];
-  P* local_buffer = nnodes == 1 ? tmp_out : reinterpret_cast<P*>(buffer) + size;
+
+  const int pe = nvshmem_my_pe();
+  const int node = pe/ngpus;
+  P* local_buffer = nnodes == 1 ? tmp_out : reinterpret_cast<P*>(buffer) + node*part;
   barrier_at_start<ngpus>(sg, self_sg, rank);
 
   // stage 1: reduce scatter
@@ -398,25 +410,30 @@ __global__ void __launch_bounds__(512, 1)
       uint64_t* local_signal = signal;
       uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
       const int pe = nvshmem_my_pe();
-      int exchange_pe = (pe + 8)%16;
 
       if (blockIdx.x == 0)
       {
-          nvshmemx_putmem_signal_nbi_block(buffer, local_buffer, part*sizeof(P),
-                  local_signal, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
+          int send_node = blockIdx.x+1;
+          int exchange_pe = (pe + send_node*ngpus)%(nnodes*ngpus);
+          nvshmemx_putmem_signal_nbi_block(reinterpret_cast<P*>(buffer) + node*part,
+                  local_buffer, part*sizeof(P),
+                  local_signal + node, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
       }
 
-      if(threadIdx.x == 0)
+      if(threadIdx.x < nnodes && threadIdx.x != node)
       {
-          nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_EQ, new_signal);
+          nvshmem_signal_wait_until(local_signal + threadIdx.x, NVSHMEM_CMP_EQ, new_signal);
       }
       __syncthreads();
       for (int idx = start + tid; idx < end; idx += stride) {
           P res = local_buffer[idx - start];
-          P buf = reinterpret_cast<P*>(buffer)[idx-start];
-          for (int j = 0; j < P::size; j++)
+          for (int recv_node = 0; recv_node<nnodes-1; recv_node++)
           {
-              res.data[j] += float(buf.data[j]);
+              P buf = reinterpret_cast<P*>(buffer)[idx-start + recv_node*part];
+              for (int j = 0; j < P::size; j++)
+              {
+                  res.data[j] += float(buf.data[j]);
+              }
           }
           reinterpret_cast<P*>(tmp_out)[idx-start] = res;
       }
