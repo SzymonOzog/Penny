@@ -221,7 +221,7 @@ DINLINE void barrier_at_start(const RankSignals& sg, Signal* self_sg,
 // synchronization barrier in the all reduce kernel. If it's the final
 // synchronization barrier, we don't need to make any visibility guarantees
 // for prior memory accesses.
-template <int ngpus, bool final_sync = false>
+template <int ngpus, bool final_sync = false, bool internode = false>
 DINLINE void barrier_at_end(const RankSignals& sg, Signal* self_sg, int rank) {
   __syncthreads();
   uint32_t flag = self_sg->_flag[blockIdx.x] + 1;
@@ -242,8 +242,12 @@ DINLINE void barrier_at_end(const RankSignals& sg, Signal* self_sg, int rank) {
 
   // use one thread to update flag
   if (threadIdx.x == 0) self_sg->_flag[blockIdx.x] = flag;
-  if (blockIdx.x == 0 && threadIdx.x >= gridDim.x && threadIdx.x < kMaxBlocks)
-      self_sg->_flag[threadIdx.x] = flag;
+  
+  if constexpr(internode)
+  {
+      if (blockIdx.x == 0 && threadIdx.x >= gridDim.x && threadIdx.x < kMaxBlocks)
+          self_sg->_flag[threadIdx.x] = flag;
+  }
 
 }
 
@@ -302,7 +306,7 @@ DINLINE P packed_reduce(const P* ptrs[], int idx) {
   return downcast<P>(tmp);
 }
 
-template <typename T, int ngpus>
+template <typename T, int ngpus, int nnodes = 1>
 __global__ void __launch_bounds__(512, 1)
     cross_device_reduce_1stage(RankData* _dp, RankSignals sg, Signal* self_sg,
                                T* __restrict__ result, int rank, int size, 
@@ -312,14 +316,16 @@ __global__ void __launch_bounds__(512, 1)
   // note: we don't reorder the address so the accumulation order is the same
   // for all ranks, ensuring bitwise identical results
   auto dp = *_dp;
-  P* local_buffer = reinterpret_cast<P*>(buffer) + size;
+  P* local_buffer = nnodes == 1 ? reinterpret_cast<P*>(result) : reinterpret_cast<P*>(buffer) + size;
   barrier_at_start<ngpus>(sg, self_sg, rank);
   // do the actual reduction
   for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < size;
        idx += gridDim.x * blockDim.x) {
     local_buffer[idx] = packed_reduce<P, ngpus, A>((const P**)&dp.ptrs[0], idx);
   }
-  barrier_at_end<ngpus, true>(sg, self_sg, rank);
+  barrier_at_end<ngpus, true, (nnodes>1)>(sg, self_sg, rank);
+  if (nnodes == 1)
+      return;
 
   __syncthreads();
   uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
@@ -355,7 +361,7 @@ DINLINE P* get_tmp_buf(Signal* sg) {
   return (P*)(((Signal*)sg) + 1);
 }
 
-template <typename T, int ngpus>
+template <typename T, int ngpus, int nnodes = 1>
 __global__ void __launch_bounds__(512, 1)
     cross_device_reduce_2stage(RankData* _dp, RankSignals sg, Signal* self_sg,
                                T* __restrict__ result, int rank, int size, 
@@ -376,43 +382,46 @@ __global__ void __launch_bounds__(512, 1)
     ptrs[i] = (const P*)_dp->ptrs[target];
     tmps[i] = get_tmp_buf<P>(sg.signals[target]);
   }
-  P* local_buffer = reinterpret_cast<P*>(buffer) + size;
   auto tmp_out = tmps[0];
+  P* local_buffer = nnodes == 1 ? tmp_out : reinterpret_cast<P*>(buffer) + size;
   barrier_at_start<ngpus>(sg, self_sg, rank);
 
   // stage 1: reduce scatter
   for (int idx = start + tid; idx < end; idx += stride) {
     local_buffer[idx - start] = packed_reduce<P, ngpus, A>(ptrs, idx);
   }
-  barrier_at_end<ngpus>(sg, self_sg, rank);
+  barrier_at_end<ngpus, false, (nnodes>1)>(sg, self_sg, rank);
 
-  __syncthreads();
-  uint64_t* local_signal = signal;
-  uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
-  const int pe = nvshmem_my_pe();
-  int exchange_pe = (pe + 8)%16;
-
-  if (blockIdx.x == 0)
+  if (nnodes > 1)
   {
-      nvshmemx_putmem_signal_nbi_block(buffer, local_buffer, part*sizeof(P),
-              local_signal, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
-  }
+      __syncthreads();
+      uint64_t* local_signal = signal;
+      uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
+      const int pe = nvshmem_my_pe();
+      int exchange_pe = (pe + 8)%16;
 
-  if(threadIdx.x == 0)
-  {
-      nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_EQ, new_signal);
-  }
-  __syncthreads();
-  for (int idx = start + tid; idx < end; idx += stride) {
-      P res = local_buffer[idx - start];
-      P buf = reinterpret_cast<P*>(buffer)[idx-start];
-      for (int j = 0; j < P::size; j++)
+      if (blockIdx.x == 0)
       {
-          res.data[j] += float(buf.data[j]);
+          nvshmemx_putmem_signal_nbi_block(buffer, local_buffer, part*sizeof(P),
+                  local_signal, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
       }
-      reinterpret_cast<P*>(tmp_out)[idx-start] = res;
+
+      if(threadIdx.x == 0)
+      {
+          nvshmem_signal_wait_until(local_signal, NVSHMEM_CMP_EQ, new_signal);
+      }
+      __syncthreads();
+      for (int idx = start + tid; idx < end; idx += stride) {
+          P res = local_buffer[idx - start];
+          P buf = reinterpret_cast<P*>(buffer)[idx-start];
+          for (int j = 0; j < P::size; j++)
+          {
+              res.data[j] += float(buf.data[j]);
+          }
+          reinterpret_cast<P*>(tmp_out)[idx-start] = res;
+      }
+      barrier_at_end<ngpus, false, (nnodes>1)>(sg, self_sg, rank);
   }
-  barrier_at_end<ngpus>(sg, self_sg, rank);
 
   // stage 2: allgather. Note: it's important to match the tid between
   // the two stages, because visibility across devices is only guaranteed
