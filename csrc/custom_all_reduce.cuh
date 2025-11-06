@@ -333,10 +333,10 @@ __global__ void __launch_bounds__(512, 1)
   __syncthreads();
   uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
   uint64_t* local_signal = signal;
-  if (blockIdx.x == 0)
+  if (blockIdx.x < nnodes && blockIdx.x != node)
   {
-      int send_node = blockIdx.x+1;
-      int exchange_pe = (pe + send_node*ngpus)%(nnodes*ngpus);
+      int send_node = blockIdx.x;
+      int exchange_pe = (rank + send_node*ngpus)%(nnodes*ngpus);
       nvshmemx_putmem_signal_nbi_block(reinterpret_cast<P*>(buffer) + node*size,
               local_buffer, size*sizeof(P),
               local_signal + node, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
@@ -411,10 +411,10 @@ __global__ void __launch_bounds__(512, 1)
       uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
       const int pe = nvshmem_my_pe();
 
-      if (blockIdx.x == 0)
+      if (blockIdx.x < nnodes && blockIdx.x != node)
       {
-          int send_node = blockIdx.x+1;
-          int exchange_pe = (pe + send_node*ngpus)%(nnodes*ngpus);
+          int send_node = blockIdx.x;
+          int exchange_pe = (rank + send_node*ngpus)%(nnodes*ngpus);
           nvshmemx_putmem_signal_nbi_block(reinterpret_cast<P*>(buffer) + node*part,
                   local_buffer, part*sizeof(P),
                   local_signal + node, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
@@ -659,6 +659,8 @@ class CustomAllreduce {
     size /= d;
     auto bytes = size * sizeof(typename packed_t<T>::P);
     int blocks = std::min(block_limit, (size + threads - 1) / threads);
+    constexpr int nnodes = 2;
+    blocks = std::max(blocks, nnodes);
 
     // Check environment variable once
     const char* env_algo = std::getenv("VLLM_CUSTOM_ALLREDUCE_ALGO");
@@ -679,7 +681,7 @@ class CustomAllreduce {
     }
 
 #define KL(ngpus, name)                                                       \
-  name<T, ngpus><<<blocks, threads, 0, stream>>>(ptrs, sg_, self_sg_, output, \
+  name<T, ngpus, nnodes><<<blocks, threads, 0, stream>>>(ptrs, sg_, self_sg_, output, \
                                                  rank_, size, buffer, signal);
 #define REDUCE_CASE(ngpus)                              \
   case ngpus: {                                         \
