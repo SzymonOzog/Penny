@@ -659,8 +659,9 @@ class CustomAllreduce {
     size /= d;
     auto bytes = size * sizeof(typename packed_t<T>::P);
     int blocks = std::min(block_limit, (size + threads - 1) / threads);
-    constexpr int nnodes = 2;
-    blocks = std::max(blocks, nnodes);
+
+    const int nnodes_ = nvshmem_n_pes()/world_size_;
+    blocks = std::max(blocks, nnodes_);
 
     // Check environment variable once
     const char* env_algo = std::getenv("VLLM_CUSTOM_ALLREDUCE_ALGO");
@@ -680,44 +681,59 @@ class CustomAllreduce {
       }
     }
 
-#define KL(ngpus, name)                                                       \
+#define KL(ngpus, nnodes, name)                                                       \
   name<T, ngpus, nnodes><<<blocks, threads, 0, stream>>>(ptrs, sg_, self_sg_, output, \
                                                  rank_, size, buffer, signal);
-#define REDUCE_CASE(ngpus)                              \
-  case ngpus: {                                         \
-    if (force_1stage) {                                 \
-      KL(ngpus, cross_device_reduce_1stage);            \
-    } else if (force_2stage) {                          \
-      KL(ngpus, cross_device_reduce_2stage);            \
-    } else {                                            \
-      if (world_size_ == 2) {                           \
-        KL(ngpus, cross_device_reduce_1stage);          \
-      } else if (fully_connected_) {                    \
-        if ((world_size_ <= 4 && bytes < 512 * 1024) || \
-            (world_size_ <= 8 && bytes < 256 * 1024)) { \
-          KL(ngpus, cross_device_reduce_1stage);        \
-        } else {                                        \
-          KL(ngpus, cross_device_reduce_2stage);        \
-        }                                               \
-      }                                                 \
-    }                                                   \
-    break;                                              \
+
+#define REDUCE_CASE(ngpus, nnodes)                        \
+  case ngpus: {                                           \
+    if (force_1stage) {                                   \
+      KL(ngpus, nnodes, cross_device_reduce_1stage);      \
+    } else if (force_2stage) {                            \
+      KL(ngpus, nnodes, cross_device_reduce_2stage);      \
+    } else {                                              \
+      if (world_size_ == 2) {                             \
+        KL(ngpus, nnodes, cross_device_reduce_1stage);    \
+      } else if (fully_connected_) {                      \
+        if ((world_size_ <= 4 && bytes < 512 * 1024) ||   \
+            (world_size_ <= 8 && bytes < 256 * 1024)) {   \
+          KL(ngpus, nnodes, cross_device_reduce_1stage);  \
+        } else {                                          \
+          KL(ngpus, nnodes, cross_device_reduce_2stage);  \
+        }                                                 \
+      }                                                   \
+    }                                                     \
+    break;                                                \
   }
 
-    switch (world_size_) {
-      REDUCE_CASE(2)
-      REDUCE_CASE(4)
-      REDUCE_CASE(6)
-      REDUCE_CASE(8)
-      default:
-        throw std::runtime_error(
-            "custom allreduce only supports num gpus in (2,4,6,8). Actual "
-            "num "
-            "gpus = " +
-            std::to_string(world_size_));
+#define NODE_CASE(nnodes)                                \
+  case nnodes: {                                         \
+    switch (world_size_) {                               \
+        REDUCE_CASE(2, nnodes)                           \
+        REDUCE_CASE(4, nnodes)                           \
+        REDUCE_CASE(6, nnodes)                           \
+        REDUCE_CASE(8, nnodes)                           \
+        default:                                         \
+                throw std::runtime_error(                \
+                        "custom allreduce only supports" \
+                        "num gpus in (2,4,6,8). Actual " \
+                        "num "                           \
+                        "gpus = " +                      \
+                        std::to_string(world_size_));    \
+        }                                                \
+       break;                                            \
+   }
+
+    switch(nnodes_)
+    {
+        NODE_CASE(1)
+        NODE_CASE(2)
+        NODE_CASE(3)
+        NODE_CASE(4)
     }
 #undef REDUCE_CASE
 #undef KL
+#undef NODE_CASE
   }
 
   ~CustomAllreduce() {
