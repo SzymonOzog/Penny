@@ -60,8 +60,13 @@ def main():
             best_configuration = None
             packet_sizes = args.packet_sizes
             n_routes = [1, 2, 4, 8, 16, 32] if args.algo in [3, 4] else [1]
+            block_sizes = args.block_sizes
+            if args.algo > 3:
+                packet_sizes = [-1]
+                n_routes = [-1]
+                block_sizes = [-1]
             for packet_size in packet_sizes:
-                for block_size in args.block_sizes:
+                for block_size in block_sizes:
                     for routes in n_routes:
                         if pow > 23 and packet_size < 32:
                             continue
@@ -91,9 +96,14 @@ def main():
                         data2 = data.clone()
                         data3 = data.clone()
                         penny_out = torch.empty_like(data);
+                        custom_out = torch.empty_like(data);
                         penny_cpp.nvshmem_register(penny_out)
+                        penny_cpp.nvshmem_register(custom_out)
                         recv_bytes = 2 * data2.nelement() * data2.element_size()
-                        handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, routes, args.algo)
+                        if args.algo < 4:
+                            handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, routes, args.algo)
+                        else:
+                            handle = None
 
                         for _ in range(args.num_tests):
                             #avoid stacking errors
@@ -104,35 +114,35 @@ def main():
                                 dist.all_reduce(data)
                                 # penny_cpp.all_reduce_run(handle, penny_out)
                                 if custom_ar is not None:
-                                    data3 = custom_ar.all_reduce(data3, out=penny_out)
-                                    torch.cuda.synchronize()
-                            data2.copy_(data)
+                                    custom_ar.all_reduce(data3, out=custom_out)
 
-
-                            # if not torch.allclose(data, penny_out, atol=args.atol, rtol=args.rtol) and rank == 0:
-                            #     idx = torch.isclose(data, penny_out, atol=args.atol, rtol=args.rtol)
-                            #     num_missed = idx.logical_not().sum() / idx.nelement()
-                            #     print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {penny_out.mean()}")
-                            #     print(data[idx.logical_not()][:10])
-                            #     print(penny_out[idx.logical_not()][:10])
-                            #     print(data[:10])
-                            #     print(penny_out[:10])
-
-                            if custom_ar is not None and not torch.allclose(data, data3, atol=args.atol, rtol=args.rtol) and rank == 0:
-                                idx = torch.isclose(data, data3, atol=args.atol, rtol=args.rtol)
+                            if handle is not None and not torch.allclose(data, penny_out, atol=args.atol, rtol=args.rtol) and rank == 0:
+                                idx = torch.isclose(data, penny_out, atol=args.atol, rtol=args.rtol)
                                 num_missed = idx.logical_not().sum() / idx.nelement()
-                                print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {data3.mean()}")
+                                print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {penny_out.mean()}")
                                 print(data[idx.logical_not()][:10])
-                                print(data3[idx.logical_not()][:10])
+                                print(penny_out[idx.logical_not()][:10])
                                 print(data[:10])
-                                print(data3[:10])
+                                print(penny_out[:10])
+
+                            if custom_ar is not None and not torch.allclose(data, custom_out, atol=args.atol, rtol=args.rtol) and rank == 0:
+                                idx = torch.isclose(data, custom_out, atol=args.atol, rtol=args.rtol)
+                                num_missed = idx.logical_not().sum() / idx.nelement()
+                                print(f"failed {configuration=} {rank=}, {num_missed=} {data.mean()}, {custom_out.mean()}")
+                                print(data[idx.logical_not()][:10])
+                                print(custom_out[idx.logical_not()][:10])
+                                print(data[:10])
+                                print(custom_out[:10])
 
                         if args.profile_mode == "info" or args.profile_mode == "verbose":
-                            penny_time = bench_kineto(lambda: penny_cpp.all_reduce_run(handle, penny_out),
-                                                      kernel_name="all_reduce")
+                            if handle is not None:
+                                penny_time = bench_kineto(lambda: penny_cpp.all_reduce_run(handle, penny_out),
+                                                          kernel_name="all_reduce")
+                            else:
+                                penny_time = 1
                             nccl_time = bench_kineto(lambda: dist.all_reduce(data), kernel_name="AllReduce_Sum_f16")
                             if custom_ar is not None:
-                                custom_time = bench_kineto(lambda: custom_ar.all_reduce(data3, out=penny_out),
+                                custom_time = bench_kineto(lambda: custom_ar.all_reduce(data3, out=custom_out),
                                                           kernel_name="cross_device")
                             else:
                                 custom_time = 1
@@ -149,8 +159,10 @@ def main():
                                       f"custom_time: {custom_time:.2f}us, "
                                       f"bandwidth {recv_bytes / 1e3 / custom_time :.2f} GB/s"
                                       )
-                        penny_cpp.all_reduce_destroy(handle)
+                        if handle is not None:
+                            penny_cpp.all_reduce_destroy(handle)
                         penny_cpp.nvshmem_unregister(penny_out)
+                        penny_cpp.nvshmem_unregister(custom_out)
 
             if rank == 0 and args.profile_mode == "info" and best_configuration is None:
                 print(f"no configuration found for {num=}")
