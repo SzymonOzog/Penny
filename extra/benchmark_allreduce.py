@@ -98,7 +98,6 @@ def main():
                         penny_out = torch.empty_like(data);
                         custom_out = torch.empty_like(data);
                         penny_cpp.nvshmem_register(penny_out)
-                        penny_cpp.nvshmem_register(custom_out)
                         recv_bytes = 2 * data2.nelement() * data2.element_size()
                         if args.algo < 4:
                             handle = penny_cpp.all_reduce_create(data2, packet_size, block_size, nnodes, routes, args.algo)
@@ -162,7 +161,6 @@ def main():
                         if handle is not None:
                             penny_cpp.all_reduce_destroy(handle)
                         penny_cpp.nvshmem_unregister(penny_out)
-                        penny_cpp.nvshmem_unregister(custom_out)
 
             if rank == 0 and args.profile_mode == "info" and best_configuration is None:
                 print(f"no configuration found for {num=}")
