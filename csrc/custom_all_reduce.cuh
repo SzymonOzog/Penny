@@ -427,8 +427,10 @@ __global__ void __launch_bounds__(512, 1)
       __syncthreads();
       for (int idx = start + tid; idx < end; idx += stride) {
           P res = local_buffer[idx - start];
-          for (int recv_node = 0; recv_node<nnodes-1; recv_node++)
+          for (int recv_node = 0; recv_node<nnodes; recv_node++)
           {
+              if(recv_node == node)
+                  continue;
               P buf = reinterpret_cast<P*>(buffer)[idx-start + recv_node*part];
               for (int j = 0; j < P::size; j++)
               {
