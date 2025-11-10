@@ -10,8 +10,8 @@ from torch.distributed import ProcessGroup
 import logging 
 logger = logging.getLogger(__name__)
 import penny_cpp as ops
-#TODO
-nnodes = int(os.getenv("NNODES", "1"))
+#TODO is there a way to get this?
+nnodes = int(os.getenv("NNODES"))
 
 
 try:
