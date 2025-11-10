@@ -1,5 +1,4 @@
-#TODO link and whatever I need to do here
-# Copied and adapted from: 
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.6.4.post1/vllm/distributed/device_communicators/custom_all_reduce.py
 from contextlib import contextmanager
 from typing import Optional, Union
 
