@@ -90,9 +90,9 @@ def main():
 
                         configuration = f"{packet_size=} {block_size=} {num=}, {routes=}"
 
-                        data = torch.empty(num, device="cuda", dtype=torch.float16).normal_(mean=0, std=0.1)
-                        mul = [(i*world_size + num)//num for i in range(num)]
-                        data = torch.ones(num, device="cuda", dtype=torch.float16) * torch.tensor(mul).to(data.device)
+                        data = torch.empty(num, device="cuda", dtype=torch.float16).normal_(mean=0, std=1) + 1
+                        # mul = [(i*world_size + num)//num for i in range(num)]
+                        # data = torch.ones(num, device="cuda", dtype=torch.float16) * torch.tensor(mul).to(data.device)
                         data2 = data.clone()
                         data3 = data.clone()
                         penny_out = torch.empty_like(data);
