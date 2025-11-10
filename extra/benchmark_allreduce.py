@@ -68,7 +68,7 @@ def main():
             for packet_size in packet_sizes:
                 for block_size in block_sizes:
                     for routes in n_routes:
-                        if pow > 23 and packet_size < 32 and algo < 4:
+                        if pow > 23 and packet_size < 32 and args.algo < 4:
                             continue
                         if args.algo == 0 and (num * elem_size) % (packet_size * block_size * world_size * routes) != 0:
                             continue
