@@ -306,6 +306,7 @@ class CustomAllreduce:
         world_size = dist.get_world_size(group=group)
         local_size = world_size//nnodes
         rank = dist.get_rank(group=group)
+        local_rank = rank%local_size
         handles = [None] * world_size
         dist.all_gather_object(handles, handle, group=group)
         off = (rank//local_size)*local_size
@@ -313,7 +314,7 @@ class CustomAllreduce:
 
         pointers: list[int] = []
         for i, h in enumerate(handles):
-            if i == dist.get_node_local_rank():
+            if i == local_rank:
                 pointers.append(pointer)  # type: ignore
             else:
                 pointers.append(ops.open_mem_handle(h))
