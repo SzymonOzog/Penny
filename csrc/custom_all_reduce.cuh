@@ -407,7 +407,6 @@ __global__ void __launch_bounds__(512, 1)
 
   if (nnodes > 1)
   {
-      __syncthreads();
       uint64_t* local_signal = signal;
       uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
       const int pe = nvshmem_my_pe();
