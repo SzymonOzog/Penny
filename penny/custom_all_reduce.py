@@ -63,7 +63,8 @@ class CustomAllreduce:
                  group: ProcessGroup,
                  device: Union[int, str, torch.device],
                  max_size=8192 * 1024,
-                 symm_mem_enabled=False) -> None:
+                 symm_mem_enabled=False,
+                 nvshmem_registered=False) -> None:
         """
         Args:
             group: the process group to work on. If None, it will use the
@@ -76,6 +77,17 @@ class CustomAllreduce:
         """
         self._IS_CAPTURING = False
         self.disabled = True
+        if not nvshmem_registered:
+            world_size = dist.get_world_size()
+            local_size = world_size//nnodes
+            local_rank = dist.get_rank() % local_size
+
+            torch.cuda.set_device(local_rank)
+            nvshmem_uid = ops.get_unique_id()
+
+            nvshmem_uids = [None, ] * world_size
+            dist.all_gather_object(nvshmem_uids, nvshmem_uid)
+            ops.init_with_uid(nvshmem_uids[0], dist.get_rank(), world_size)
 
         if not custom_ar:
             # disable because of missing custom allreduce library

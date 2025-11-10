@@ -45,7 +45,7 @@ def main():
     if args.bench_custom:
         from penny.custom_all_reduce import CustomAllreduce
         group = dist.new_group(list(range(world_size)), backend="gloo") 
-        custom_ar = CustomAllreduce(group, device=local_rank, max_size = 2**(args.start_pow + args.range))
+        custom_ar = CustomAllreduce(group, device=local_rank, max_size = 2**(args.start_pow + args.range), nvshmem_registered=True)
     else:
         custom_ar = None
     # float16
