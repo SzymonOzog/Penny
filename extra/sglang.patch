@@ -1,0 +1,19 @@
+diff --git a/python/sglang/srt/distributed/parallel_state.py b/python/sglang/srt/distributed/parallel_state.py
+index c954d1e52..a041ab016 100644
+--- a/python/sglang/srt/distributed/parallel_state.py
++++ b/python/sglang/srt/distributed/parallel_state.py
+@@ -326,9 +326,10 @@ class GroupCoordinator:
+         self.use_message_queue_broadcaster = use_message_queue_broadcaster
+
+         # Lazy import to avoid documentation build error
+-        from sglang.srt.distributed.device_communicators.custom_all_reduce import (
+-            CustomAllreduce,
+-        )
++        # from sglang.srt.distributed.device_communicators.custom_all_reduce import (
++        #     CustomAllreduce,
++        # )
++        from penny.custom_all_reduce import CustomAllreduce
+         from sglang.srt.distributed.device_communicators.pymscclpp import (
+             PyMscclppCommunicator,
+         )
+
