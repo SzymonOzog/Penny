@@ -45,7 +45,8 @@ def main():
             num = 2 ** pow
             out_num = num//world_size
             data = torch.empty(num, device="cuda", dtype=torch.float16).normal_(mean=0, std=1) + 1
-            out = torch.empty(out_num, device="cuda", dtype=torch.float16).normal_(mean=0, std=1) + 1
+            out = torch.empty(out_num, device="cuda", dtype=torch.float16)
+            custom_out = torch.empty(out_num, device="cuda", dtype=torch.float16)
 
             # mul = [(i*world_size + num)//num for i in range(num)]
             # data = torch.ones(num, device="cuda", dtype=torch.float16) * torch.tensor(mul).to(data.device)
@@ -57,10 +58,10 @@ def main():
                 data2.copy_(data)
 
                 dist.reduce_scatter_tensor(out, data)
-                custom_out = custom_ar.all_reduce(data2)[rank*out_num : (rank+1)*out_num]
+                custom_out = custom_ar.reduce_scatter(data2, out=custom_out)
 
 
-                if custom_ar is not None and not torch.allclose(out, custom_out, atol=args.atol, rtol=args.rtol) and rank == 0:
+                if not torch.allclose(out, custom_out, atol=args.atol, rtol=args.rtol):
                     idx = torch.isclose(out, custom_out, atol=args.atol, rtol=args.rtol)
                     num_missed = idx.logical_not().sum() / idx.nelement()
                     print(f"failed {rank=}, {num_missed=} {out.mean()}, {custom_out.mean()}")
@@ -72,7 +73,7 @@ def main():
             if args.profile_mode == "info" or args.profile_mode == "verbose":
 
                 nccl_time = bench_kineto(lambda: dist.reduce_scatter_tensor(out, data), kernel_name="ReduceScatter_Sum_f16")
-                custom_time = bench_kineto(lambda: custom_ar.all_reduce(data2),
+                custom_time = bench_kineto(lambda: custom_ar.reduce_scatter(data2, out=custom_out),
                                           kernel_name="cross_device")
 
                 if rank == 0 and args.profile_mode == "verbose":

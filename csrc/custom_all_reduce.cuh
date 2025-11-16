@@ -460,6 +460,84 @@ __global__ void __launch_bounds__(512, 1)
   }
 }
 
+template <typename T, int ngpus, int nnodes = 2>
+__global__ void __launch_bounds__(512, 1)
+    cross_device_reduce_scatter_2stage(RankData* _dp, RankSignals sg, Signal* self_sg,
+                               T* __restrict__ result, int rank, int size, 
+                               void* buffer, uint64_t * signal) {
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = gridDim.x * blockDim.x;
+  using P = typename packed_t<T>::P;
+  using A = typename packed_t<T>::A;
+  int part = size / (ngpus*nnodes);
+  int start = rank * part;
+  //TODO are we sure that this cannot go out of bounds?
+  int end = start + part;
+  const P* ptrs[ngpus];
+  P* tmps[ngpus];
+#pragma unroll
+  for (int i = 0; i < ngpus; i++) {
+    int target = (rank + i) % ngpus;
+    ptrs[i] = (const P*)_dp->ptrs[target];
+    tmps[i] = get_tmp_buf<P>(sg.signals[target]);
+  }
+  auto tmp_out = tmps[0];
+
+  const int pe = nvshmem_my_pe();
+  const int node = pe/ngpus;
+  P* local_buffer = nnodes == 1 ? reinterpret_cast<P*>(result )
+      : reinterpret_cast<P*>(buffer) + node*part;
+  barrier_at_start<ngpus>(sg, self_sg, rank);
+
+  // stage 1: reduce scatter
+  for(int node_part = 0; node_part<nnodes; node_part++)
+  {
+      int off = node_part*ngpus*part;
+      for (int idx = start + tid; idx < end; idx += stride) {
+          local_buffer[off + idx - start] = packed_reduce<P, ngpus, A>(ptrs, off + idx);
+      }
+  }
+  barrier_at_end<ngpus, false, (nnodes>1)>(sg, self_sg, rank);
+
+  if (nnodes > 1)
+  {
+      __syncthreads();
+      uint64_t* local_signal = signal;
+      uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
+      const int pe = nvshmem_my_pe();
+
+      if (blockIdx.x < nnodes && blockIdx.x != node)
+      {
+          int send_node = blockIdx.x;
+          int exchange_pe = (rank + send_node*ngpus)%(nnodes*ngpus);
+          nvshmemx_putmem_signal_nbi_block(reinterpret_cast<P*>(buffer) + node*part,
+                  local_buffer + send_node*ngpus*part, part*sizeof(P),
+                  local_signal + node, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
+      }
+
+      if(threadIdx.x < nnodes && threadIdx.x != node)
+      {
+          nvshmem_signal_wait_until(local_signal + threadIdx.x, NVSHMEM_CMP_EQ, new_signal);
+      }
+      __syncthreads();
+      for (int idx = start + tid; idx < end; idx += stride) {
+          P res = local_buffer[idx - start + node*ngpus*part];
+          for (int recv_node = 0; recv_node<nnodes; recv_node++)
+          {
+              if(recv_node == node)
+                  continue;
+              P buf = reinterpret_cast<P*>(buffer)[idx-start + recv_node*part];
+              for (int j = 0; j < P::size; j++)
+              {
+                  res.data[j] += float(buf.data[j]);
+              }
+          }
+          reinterpret_cast<P*>(result)[idx-start] = res;
+      }
+      barrier_at_end<ngpus, false, (nnodes>1)>(sg, self_sg, rank);
+  }
+}
+
 using IPC_KEY = std::array<uint8_t, sizeof(cudaIpcMemHandle_t)>;
 static_assert(sizeof(IPC_KEY) == sizeof(cudaIpcMemHandle_t));
 static_assert(alignof(IPC_KEY) == alignof(cudaIpcMemHandle_t));
@@ -720,6 +798,94 @@ class CustomAllreduce {
                         "custom allreduce only supports" \
                         "num gpus in (2,4,6,8). Actual " \
                         "num "                           \
+                        "gpus = " +                      \
+                        std::to_string(world_size_));    \
+        }                                                \
+       break;                                            \
+   }
+
+    switch(nnodes_)
+    {
+        NODE_CASE(1)
+        NODE_CASE(2)
+        NODE_CASE(3)
+        NODE_CASE(4)
+    }
+#undef REDUCE_CASE
+#undef KL
+#undef NODE_CASE
+  }
+
+  /**
+   * Performs reduce_scatter, assuming input has already been registered.
+   */
+  template <typename T>
+  void reduce_scatter(cudaStream_t stream, T* input, T* output, int size,
+                 int threads = 512, int block_limit = defaultBlockLimit) {
+    auto d = packed_t<T>::P::size;
+    if(size % world_size_ != 0)
+      throw std::runtime_error(
+          "custom reduce scatter currently requires input length to be multiple "
+          "of ngpus");
+    if ((size/nvshmem_n_pes())% d != 0)
+      throw std::runtime_error(
+          "custom reduce scatter currently requires output length to be multiple "
+          "of " +
+          std::to_string(d));
+    if (size < 2048)
+      throw std::runtime_error(
+          "Currently reduce scatter requires a minimum size of 2048(TODO)");
+    if (block_limit > kMaxBlocks)
+      throw std::runtime_error("max supported block limit is " +
+                               std::to_string(kMaxBlocks) + ". Got " +
+                               std::to_string(block_limit));
+
+    RankData* ptrs;
+    cudaStreamCaptureStatus status;
+    CUDACHECK(cudaStreamIsCapturing(stream, &status));
+    if (status == cudaStreamCaptureStatusActive) {
+      ptrs = d_rank_data_base_ + graph_unreg_buffers_.size();
+      graph_unreg_buffers_.push_back(input);
+    } else {
+      auto it = buffers_.find(input);
+      if (it == buffers_.end())
+        throw std::runtime_error(
+            "buffer address " +
+            std::to_string(reinterpret_cast<uint64_t>(input)) +
+            " is not registered!");
+      ptrs = it->second;
+    }
+
+    size /= d;
+    int blocks = std::min(block_limit, (size + threads - 1) / threads);
+
+    const int nnodes_ = nvshmem_n_pes()/world_size_;
+    blocks = std::max(blocks, nnodes_);
+
+    // Check environment variable once
+
+#define KL(ngpus, nnodes, name)                                                       \
+  name<T, ngpus, nnodes><<<blocks, threads, 0, stream>>>(ptrs, sg_, self_sg_, output, \
+                                                 rank_, size, buffer, signal);
+
+#define REDUCE_CASE(ngpus, nnodes)                        \
+  case ngpus: {                                           \
+    KL(ngpus, nnodes, cross_device_reduce_scatter_2stage);\
+    break;                                                \
+  }
+
+#define NODE_CASE(nnodes)                                \
+  case nnodes: {                                         \
+    switch (world_size_) {                               \
+        REDUCE_CASE(2, nnodes)                           \
+        REDUCE_CASE(4, nnodes)                           \
+        REDUCE_CASE(6, nnodes)                           \
+        REDUCE_CASE(8, nnodes)                           \
+        default:                                         \
+                throw std::runtime_error(                \
+                        "custom reduce scatter"          \
+                        "only supportsnum gpus"          \
+                        " in (2,4,6,8). Actual num "     \
                         "gpus = " +                      \
                         std::to_string(world_size_));    \
         }                                                \

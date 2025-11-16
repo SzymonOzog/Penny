@@ -258,12 +258,52 @@ class CustomAllreduce:
             else:
                 # If warm up, mimic the allocation pattern since custom
                 # allreduce is out-of-place.
-                return torch.empty_like(input)
+                # TODO this should have smaller shape
+                return torch.empty_like(out)
         else:
             # Note: outside of cuda graph context, custom allreduce incurs a
             # cost of cudaMemcpy, which should be small (<=1% of overall
             # latency) compared to the performance gain of using custom kernels
             return self.all_reduce(input, out=out, registered=False)
+
+    def reduce_scatter(self,
+                   inp: torch.Tensor,
+                   *,
+                   out: torch.Tensor = None,
+                   registered: bool = False):
+        """Performs an out-of-place reduce scatter.
+        
+        If registered is True, this assumes inp's pointer is already
+        IPC-registered. Otherwise, inp is first copied into a pre-registered
+        buffer.
+        """
+        if out is None:
+            out = torch.empty_like(inp)
+
+        if registered:
+            ops.reduce_scatter(self._ptr, inp, out, 0, 0)
+        else:
+            ops.reduce_scatter(self._ptr, inp, out, self.buffer_ptrs[self.rank],
+                           self.max_size)
+        return out
+
+    def custom_reduce_scatter(self, input: torch.Tensor, out = None) -> Optional[torch.Tensor]:
+        """The main reduce scatter API that provides support for cuda graph."""
+        # When custom allreduce is disabled, this will be None.
+        if self.disabled or not self.should_custom_ar(input):
+            return None
+        if self._IS_CAPTURING:
+            if torch.cuda.is_current_stream_capturing():
+                return self.reduce_scatter(input, out=out, registered=True)
+            else:
+                # If warm up, mimic the allocation pattern since custom
+                # allreduce is out-of-place.
+                return torch.empty_like(input)
+        else:
+            # Note: outside of cuda graph context, custom allreduce incurs a
+            # cost of cudaMemcpy, which should be small (<=1% of overall
+            # latency) compared to the performance gain of using custom kernels
+            return self.reduce_scatter(input, out=out, registered=False)
 
     def close(self):
         if not self.disabled and self._ptr:
