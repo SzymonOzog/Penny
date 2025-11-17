@@ -243,7 +243,7 @@ DINLINE void barrier_at_end(const RankSignals& sg, Signal* self_sg, int rank) {
 
   // use one thread to update flag
   if (threadIdx.x == 0) self_sg->_flag[blockIdx.x] = flag;
-  
+
   if constexpr(internode)
   {
       if (blockIdx.x == 0 && threadIdx.x >= gridDim.x && threadIdx.x < kMaxBlocks)
@@ -310,7 +310,7 @@ DINLINE P packed_reduce(const P* ptrs[], int idx) {
 template <typename T, int ngpus, int nnodes = 2>
 __global__ void __launch_bounds__(512, 1)
     cross_device_reduce_1stage(RankData* _dp, RankSignals sg, Signal* self_sg,
-                               T* __restrict__ result, int rank, int size, 
+                               T* __restrict__ result, int rank, int size,
                                void* buffer, uint64_t * signal) {
   using P = typename packed_t<T>::P;
   using A = typename packed_t<T>::A;
@@ -319,7 +319,7 @@ __global__ void __launch_bounds__(512, 1)
   auto dp = *_dp;
   const int pe = nvshmem_my_pe();
   const int node = pe/ngpus;
-  P* local_buffer = nnodes == 1 ? reinterpret_cast<P*>(result) 
+  P* local_buffer = nnodes == 1 ? reinterpret_cast<P*>(result)
                                 : reinterpret_cast<P*>(buffer) + node*size;
   barrier_at_start<ngpus>(sg, self_sg, rank);
   // do the actual reduction
@@ -374,7 +374,7 @@ DINLINE P* get_tmp_buf(Signal* sg) {
 template <typename T, int ngpus, int nnodes = 2>
 __global__ void __launch_bounds__(512, 1)
     cross_device_reduce_2stage(RankData* _dp, RankSignals sg, Signal* self_sg,
-                               T* __restrict__ result, int rank, int size, 
+                               T* __restrict__ result, int rank, int size,
                                void* buffer, uint64_t * signal) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = gridDim.x * blockDim.x;
@@ -464,7 +464,7 @@ __global__ void __launch_bounds__(512, 1)
 template <typename T, int ngpus, int nnodes = 2>
 __global__ void __launch_bounds__(512, 1)
     cross_device_reduce_scatter_2stage(RankData* _dp, RankSignals sg, Signal* self_sg,
-                               T* __restrict__ result, int rank, int size, 
+                               T* __restrict__ result, int rank, int size,
                                void* buffer, uint64_t * signal) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = gridDim.x * blockDim.x;
@@ -587,11 +587,11 @@ __global__ void __launch_bounds__(512, 1)
       int off = (node*ngpus + gpu_id)*part;
       for (int idx = tid; idx < part; idx += stride) {
           local_buffer[off + idx] = ((const P*)_dp->ptrs[gpu_id])[idx];
-      }                             
-  }                                 
-  barrier_at_end<ngpus, false, (nno des>1)>(sg, self_sg, rank);
+      }
+  }
+  barrier_at_end<ngpus, false, (nnodes>1)>(sg, self_sg, rank);
 
-  
+
 }
 
 using IPC_KEY = std::array<uint8_t, sizeof(cudaIpcMemHandle_t)>;
