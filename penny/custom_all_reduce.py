@@ -305,6 +305,49 @@ class CustomAllreduce:
             # latency) compared to the performance gain of using custom kernels
             return self.reduce_scatter(input, out=out, registered=False)
 
+    def all_gather(self,
+                   inp: torch.Tensor,
+                   *,
+                   out: torch.Tensor = None,
+                   registered: bool = False):
+        """Performs an out-of-place all gather.
+
+        If registered is True, this assumes inp's pointer is already
+        IPC-registered. Otherwise, inp is first copied into a pre-registered
+        buffer.
+        """
+        if out is None:
+            out = torch.empty(inp.numel() * self.world_size,
+                            dtype=inp.dtype, device=inp.device)
+
+        if registered:
+            ops.all_gather(self._ptr, inp, out, 0, 0)
+        else:
+            ops.all_gather(self._ptr, inp, out, self.buffer_ptrs[self.rank],
+                           self.max_size)
+        return out
+
+    def custom_all_gather(self, input: torch.Tensor, out = None) -> Optional[torch.Tensor]:
+        """The main all gather API that provides support for cuda graph."""
+        # When custom allreduce is disabled, this will be None.
+        if self.disabled or not self.should_custom_ar(input):
+            return None
+        if self._IS_CAPTURING:
+            if torch.cuda.is_current_stream_capturing():
+                return self.all_gather(input, out=out, registered=True)
+            else:
+                # If warm up, mimic the allocation pattern since custom
+                # allreduce is out-of-place.
+                if out is None:
+                    return torch.empty(input.numel() * self.world_size,
+                                     dtype=input.dtype, device=input.device)
+                return out
+        else:
+            # Note: outside of cuda graph context, custom allreduce incurs a
+            # cost of cudaMemcpy, which should be small (<=1% of overall
+            # latency) compared to the performance gain of using custom kernels
+            return self.all_gather(input, out=out, registered=False)
+
     def close(self):
         if not self.disabled and self._ptr:
             if ops is not None:

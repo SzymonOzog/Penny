@@ -460,6 +460,7 @@ __global__ void __launch_bounds__(512, 1)
   }
 }
 
+
 template <typename T, int ngpus, int nnodes = 2>
 __global__ void __launch_bounds__(512, 1)
     cross_device_reduce_scatter_2stage(RankData* _dp, RankSignals sg, Signal* self_sg,
@@ -501,7 +502,6 @@ __global__ void __launch_bounds__(512, 1)
 
   if (nnodes > 1)
   {
-      __syncthreads();
       uint64_t* local_signal = signal;
       uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
       const int pe = nvshmem_my_pe();
@@ -536,6 +536,62 @@ __global__ void __launch_bounds__(512, 1)
       }
       barrier_at_end<ngpus, false, (nnodes>1)>(sg, self_sg, rank);
   }
+}
+
+template <typename T, int ngpus, int nnodes = 2>
+__global__ void __launch_bounds__(512, 1)
+    cross_device_all_gather(RankData* _dp, RankSignals sg, Signal* self_sg,
+                               T* __restrict__ result, int rank, int size,
+                               void* buffer, uint64_t * signal) {
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = gridDim.x * blockDim.x;
+  using P = typename packed_t<T>::P;
+  int part = size / (ngpus*nnodes);
+
+  const int pe = nvshmem_my_pe();
+  const int node = pe/ngpus;
+  P* local_buffer = nnodes == 1 ? reinterpret_cast<P*>(result)
+      : reinterpret_cast<P*>(buffer);
+
+  if (nnodes > 1)
+  {
+      uint64_t* local_signal = signal;
+      uint32_t new_signal = self_sg->_flag[blockIdx.x] + 1;
+
+      if (blockIdx.x < nnodes && blockIdx.x != node)
+      {
+          int send_node = blockIdx.x;
+          int exchange_pe = (rank + send_node*ngpus)%(nnodes*ngpus);
+          nvshmemx_putmem_signal_nbi_block(reinterpret_cast<P*>(buffer) + node*ngpus*part,
+                  local_buffer + node*ngpus*part, ngpus*part*sizeof(P),
+                  local_signal + node, new_signal, NVSHMEM_SIGNAL_SET, exchange_pe);
+      }
+
+      if(threadIdx.x < nnodes && threadIdx.x != node)
+      {
+          nvshmem_signal_wait_until(local_signal + threadIdx.x, NVSHMEM_CMP_EQ, new_signal);
+      }
+      __syncthreads();
+
+      // Copy from buffer to result
+      for (int idx = tid; idx < size; idx += stride) {
+          reinterpret_cast<P*>(result)[idx] = local_buffer[idx];
+      }
+      barrier_at_end<ngpus, false, (nnodes>1)>(sg, self_sg, rank);
+  }
+  barrier_at_start<ngpus>(sg, self_sg, rank);
+
+  // stage 1: all gather within node
+  for(int gpu_id = 0; gpu_id < ngpus; gpu_id++)
+  {
+      int off = (node*ngpus + gpu_id)*part;
+      for (int idx = tid; idx < part; idx += stride) {
+          local_buffer[off + idx] = ((const P*)_dp->ptrs[gpu_id])[idx];
+      }                             
+  }                                 
+  barrier_at_end<ngpus, false, (nno des>1)>(sg, self_sg, rank);
+
+  
 }
 
 using IPC_KEY = std::array<uint8_t, sizeof(cudaIpcMemHandle_t)>;
@@ -900,6 +956,92 @@ class CustomAllreduce {
         NODE_CASE(4)
     }
 #undef REDUCE_CASE
+#undef KL
+#undef NODE_CASE
+  }
+
+  /**
+   * Performs all_gather, assuming input has already been registered.
+   */
+  template <typename T>
+  void all_gather(cudaStream_t stream, T* input, T* output, int size,
+                 int threads = 512, int block_limit = defaultBlockLimit) {
+    auto d = packed_t<T>::P::size;
+    if(size % world_size_ != 0)
+      throw std::runtime_error(
+          "custom all gather currently requires output length to be multiple "
+          "of ngpus");
+    if ((size/nvshmem_n_pes())% d != 0)
+      throw std::runtime_error(
+          "custom all gather currently requires input length to be multiple "
+          "of " +
+          std::to_string(d));
+    if (size < 2048)
+      throw std::runtime_error(
+          "Currently all gather requires a minimum size of 2048(TODO)");
+    if (block_limit > kMaxBlocks)
+      throw std::runtime_error("max supported block limit is " +
+                               std::to_string(kMaxBlocks) + ". Got " +
+                               std::to_string(block_limit));
+
+    RankData* ptrs;
+    cudaStreamCaptureStatus status;
+    CUDACHECK(cudaStreamIsCapturing(stream, &status));
+    if (status == cudaStreamCaptureStatusActive) {
+      ptrs = d_rank_data_base_ + graph_unreg_buffers_.size();
+      graph_unreg_buffers_.push_back(input);
+    } else {
+      auto it = buffers_.find(input);
+      if (it == buffers_.end())
+        throw std::runtime_error(
+            "buffer address " +
+            std::to_string(reinterpret_cast<uint64_t>(input)) +
+            " is not registered!");
+      ptrs = it->second;
+    }
+
+    size /= d;
+    int blocks = std::min(block_limit, (size + threads - 1) / threads);
+
+    const int nnodes_ = nvshmem_n_pes()/world_size_;
+    blocks = std::max(blocks, nnodes_);
+
+#define KL(ngpus, nnodes, name)                                                       \
+  name<T, ngpus, nnodes><<<blocks, threads, 0, stream>>>(ptrs, sg_, self_sg_, output, \
+                                                 rank_, size, buffer, signal);
+
+#define GATHER_CASE(ngpus, nnodes)                       \
+  case ngpus: {                                          \
+    KL(ngpus, nnodes, cross_device_all_gather);          \
+    break;                                               \
+  }
+
+#define NODE_CASE(nnodes)                                \
+  case nnodes: {                                         \
+    switch (world_size_) {                               \
+        GATHER_CASE(2, nnodes)                           \
+        GATHER_CASE(4, nnodes)                           \
+        GATHER_CASE(6, nnodes)                           \
+        GATHER_CASE(8, nnodes)                           \
+        default:                                         \
+                throw std::runtime_error(                \
+                        "custom all gather"              \
+                        "only supports num gpus"         \
+                        " in (2,4,6,8). Actual num "     \
+                        "gpus = " +                      \
+                        std::to_string(world_size_));    \
+        }                                                \
+       break;                                            \
+   }
+
+    switch(nnodes_)
+    {
+        NODE_CASE(1)
+        NODE_CASE(2)
+        NODE_CASE(3)
+        NODE_CASE(4)
+    }
+#undef GATHER_CASE
 #undef KL
 #undef NODE_CASE
   }
