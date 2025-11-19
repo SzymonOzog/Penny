@@ -259,7 +259,7 @@ class CustomAllreduce:
                 # If warm up, mimic the allocation pattern since custom
                 # allreduce is out-of-place.
                 # TODO this should have smaller shape
-                return torch.empty_like(out)
+                return torch.empty_like(input)
         else:
             # Note: outside of cuda graph context, custom allreduce incurs a
             # cost of cudaMemcpy, which should be small (<=1% of overall
