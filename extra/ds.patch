@@ -1,0 +1,87 @@
+diff --git a/python/sglang/srt/distributed/device_communicators/custom_all_reduce.py b/python/sglang/srt/distributed/device_communicators/custom_all_reduce.py
+index c72d8b9..7336ee6 100644
+--- a/python/sglang/srt/distributed/device_communicators/custom_all_reduce.py
++++ b/python/sglang/srt/distributed/device_communicators/custom_all_reduce.py
+@@ -420,19 +420,21 @@ class CustomAllreduce:
+ 
+ def dispatch_custom_allreduce():
+     """Return the CustomAllreduce class to use (aiter on ROCm if enabled)."""
+-    if is_hip() and get_bool_env_var("SGLANG_USE_AITER_AR", default="true"):
+-        try:
+-            from aiter.dist.device_communicators.custom_all_reduce import (
+-                CustomAllreduce as AiterCustomAllreduce,
+-            )
+-
+-            logger.info("Using AiterCustomAllreduce for ROCm.")
+-            return AiterCustomAllreduce
+-        except ImportError as e:
+-            logger.warning(
+-                "Aiter custom all-reduce not available (optional dependency missing); "
+-                "falling back to sglang CustomAllreduce. Details: %s",
+-                e,
+-            )
+-            return CustomAllreduce
+-    return CustomAllreduce
++    # if is_hip() and get_bool_env_var("SGLANG_USE_AITER_AR", default="true"):
++    #     try:
++    #         from aiter.dist.device_communicators.custom_all_reduce import (
++    #             CustomAllreduce as AiterCustomAllreduce,
++    #         )
++    #
++    #         logger.info("Using AiterCustomAllreduce for ROCm.")
++    #         return AiterCustomAllreduce
++    #     except ImportError as e:
++    #         logger.warning(
++    #             "Aiter custom all-reduce not available (optional dependency missing); "
++    #             "falling back to sglang CustomAllreduce. Details: %s",
++    #             e,
++    #         )
++    #         return CustomAllreduce
++    print("running penny allreduce")
++    from penny.custom_all_reduce import CustomAllreduce as CA
++    return CA
+diff --git a/python/sglang/srt/layers/dp_attention.py b/python/sglang/srt/layers/dp_attention.py
+index 4956d76..44c3cc8 100644
+--- a/python/sglang/srt/layers/dp_attention.py
++++ b/python/sglang/srt/layers/dp_attention.py
+@@ -67,6 +67,10 @@ class DpPaddingMode(IntEnum):
+         # we choose the mode that minimizes the communication cost
+         max_len = max(global_num_tokens)
+         sum_len = sum(global_num_tokens)
++
++        if sum_len <= 256:
++            return cls.SUM_LEN
++
+         if sum_len * 2 > max_len * get_attention_dp_size():
+             return cls.MAX_LEN
+         else:
+@@ -74,6 +78,7 @@ class DpPaddingMode(IntEnum):
+ 
+     @classmethod
+     def get_default_mode_in_cuda_graph(cls) -> DpPaddingMode:
++        # return DpPaddingMode.SUM_LEN
+         # TODO(kkhuang-amd): noqa, temporary work-around for rocm 7.0.0 alpha
+         # it can be safely removed later, once RCCL fixed
+         if _USE_ROCM700A_WA:
+@@ -497,7 +502,7 @@ def _dp_gather(
+     forward_batch: ForwardBatch,
+     is_partial: bool,
+ ):
+-    if forward_batch.dp_padding_mode.is_max_len():
++    if forward_batch.dp_padding_mode.is_max_len() and global_tokens.shape[0] > 256:
+         _dp_gather_via_all_gather(
+             global_tokens, local_tokens, forward_batch, is_partial
+         )
+diff --git a/python/sglang/srt/model_executor/cuda_graph_runner.py b/python/sglang/srt/model_executor/cuda_graph_runner.py
+index 5ab5837..81893f1 100644
+--- a/python/sglang/srt/model_executor/cuda_graph_runner.py
++++ b/python/sglang/srt/model_executor/cuda_graph_runner.py
+@@ -679,7 +679,7 @@ class CudaGraphRunner:
+             positions=positions,
+             global_num_tokens_gpu=self.global_num_tokens_gpu,
+             global_num_tokens_for_logprob_gpu=self.global_num_tokens_for_logprob_gpu,
+-            dp_padding_mode=DpPaddingMode.get_default_mode_in_cuda_graph(),
++            dp_padding_mode=DpPaddingMode.get_default_mode_in_cuda_graph() if bs > 256 else DpPaddingMode.SUM_LEN,
+             global_dp_buffer_len=global_dp_buffer_len,
+             mrope_positions=mrope_positions,
+             spec_algorithm=self.model_runner.spec_algorithm,
