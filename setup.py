@@ -62,7 +62,8 @@ if __name__ == '__main__':
                 library_dirs=library_dirs,
                 sources=sources,
                 extra_compile_args=extra_compile_args,
-                extra_link_args=extra_link_args
+                extra_link_args=extra_link_args,
+                libraries=["cuda"]
             )
         ],
         cmdclass={
