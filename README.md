@@ -29,8 +29,3 @@ export NNODES=2
 
 Afterwards you can serve your favourite model with Low Latency allreduce
 
-# Common issues and how to solve them
-Issue:
-`ImportError: /Penny/penny_cpp.cpython-312-x86_64-linux-gnu.so: undefined symbol: cuPointerGetAttribute`
-Solution:
-Export LD_PRELOAD to include a path to libcuda eg. `export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libcuda.so.1`
