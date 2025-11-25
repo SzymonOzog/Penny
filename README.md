@@ -1,7 +1,7 @@
 “What I cannot create I do not understand” - This is why I started Penny, my own version of NCCL.
 
 If you want to read about it, there is a worklog on my blogpost where I describe a step by step process of creating it:
-- [Part 1]((https://szymonozog.github.io/posts/2025-09-21-Penny-worklog-1.html))
+- [Part 1](https://szymonozog.github.io/posts/2025-09-21-Penny-worklog-1.html)
 - [Part 2](https://szymonozog.github.io/posts/2025-10-26-Penny-worklog-2.html)
 - [Part 3](https://szymonozog.github.io/posts/2025-11-11-Penny-worklog-3.html)
 
